@@ -88,6 +88,10 @@ func TestSearch(t *testing.T) {
 	var sawDigital bool
 	for _, b := range res.Bibs {
 		sawDigital = sawDigital || b.Digital
+		// OverDrive descriptions arrive as HTML.
+		if strings.ContainsAny(b.Description, "<>") {
+			t.Errorf("%s description not cleaned: %.80q", b.ID, b.Description)
+		}
 	}
 	if !sawDigital {
 		t.Error("expected at least one digital bib")

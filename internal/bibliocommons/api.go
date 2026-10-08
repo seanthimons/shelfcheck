@@ -168,7 +168,7 @@ func (b rawBib) toBib() Bib {
 		Year:        bi.PubDate,
 		Edition:     bi.Edition,
 		CallNumber:  bi.CallNumber,
-		Description: bi.Description,
+		Description: plainText(bi.Description),
 		ISBNs:       bi.ISBNs,
 		Genres:      bi.Genres,
 		Subjects:    bi.Subjects,

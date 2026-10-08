@@ -1,0 +1,414 @@
+// Package tui is the Bubble Tea interface for browsing a library catalog.
+package tui
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+
+	bc "shelfcheck/internal/bibliocommons"
+)
+
+type screen int
+
+const (
+	searchScreen screen = iota
+	resultsScreen
+	detailScreen
+)
+
+var searchTypes = []bc.SearchType{bc.Keyword, bc.Title, bc.Author, bc.Subject, bc.Series}
+
+const requestTimeout = 20 * time.Second
+
+// Model is the root Bubble Tea model.
+type Model struct {
+	client   *bc.Client
+	home     string // home branch code
+	homeName string
+
+	screen        screen
+	width, height int
+
+	input   textinput.Model
+	typeIdx int
+
+	// Current search.
+	query       string
+	qtype       bc.SearchType
+	results     []bc.Bib
+	total       int
+	page, pages int
+	cursor      int
+	offset      int // first visible result row
+	searchSeq   int // drops responses from superseded searches
+	searching   bool
+	loadingMore bool
+
+	// Per-bib data, shared by the results list (home-branch marker) and the
+	// detail screen.
+	avail        map[string]*bc.Availability
+	availPending map[string]bool
+	availErr     map[string]error
+	details      map[string]*bc.Details
+	detailsErr   map[string]error
+
+	selected bc.Bib
+	vp       viewport.Model
+	spin     spinner.Model
+	err      error
+}
+
+type (
+	searchMsg struct {
+		seq  int
+		more bool
+		res  *bc.SearchResult
+		err  error
+	}
+	availMsg struct {
+		id  string
+		a   *bc.Availability
+		err error
+	}
+	detailsMsg struct {
+		id  string
+		d   *bc.Details
+		err error
+	}
+	locationsMsg struct {
+		locs []bc.Location
+		err  error
+	}
+)
+
+// New builds the model. If query is non-empty it is searched immediately.
+func New(client *bc.Client, home, query string) Model {
+	in := textinput.New()
+	in.Prompt = "› "
+	in.Placeholder = "title, author, subject…"
+	in.CharLimit = 200
+	in.SetValue(query)
+	in.Focus()
+
+	m := Model{
+		client:       client,
+		home:         home,
+		homeName:     "branch " + home,
+		input:        in,
+		avail:        map[string]*bc.Availability{},
+		availPending: map[string]bool{},
+		availErr:     map[string]error{},
+		details:      map[string]*bc.Details{},
+		detailsErr:   map[string]error{},
+		vp:           viewport.New(),
+		spin:         spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(accentStyle)),
+	}
+	if strings.TrimSpace(query) != "" {
+		m.searchSeq = 1
+		m.searching = true
+		m.query = strings.TrimSpace(query)
+		m.qtype = bc.Keyword
+	}
+	return m
+}
+
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.spin.Tick, m.fetchLocations()}
+	if m.searching {
+		cmds = append(cmds, m.doSearch(m.searchSeq, m.query, m.qtype, 1, false))
+	}
+	return tea.Batch(cmds...)
+}
+
+// --- commands ---------------------------------------------------------------
+
+func (m Model) doSearch(seq int, q string, typ bc.SearchType, page int, more bool) tea.Cmd {
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		res, err := c.Search(ctx, q, typ, page)
+		return searchMsg{seq: seq, more: more, res: res, err: err}
+	}
+}
+
+func (m Model) fetchAvail(id string) tea.Cmd {
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		a, err := c.Availability(ctx, id)
+		return availMsg{id: id, a: a, err: err}
+	}
+}
+
+func (m Model) fetchDetails(id string) tea.Cmd {
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		d, err := c.Details(ctx, id)
+		return detailsMsg{id: id, d: d, err: err}
+	}
+}
+
+func (m Model) fetchLocations() tea.Cmd {
+	c := m.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		locs, err := c.Locations(ctx)
+		return locationsMsg{locs: locs, err: err}
+	}
+}
+
+// prefetchVisible loads copy-level availability for the physical titles on
+// screen that have a copy on a shelf somewhere, so the list can show whether
+// one is at the home branch. Only visible rows are fetched to keep traffic low.
+func (m *Model) prefetchVisible() tea.Cmd {
+	var cmds []tea.Cmd
+	end := min(len(m.results), m.offset+m.listHeight())
+	for _, b := range m.results[min(m.offset, end):end] {
+		if b.Digital || b.Summary.Available == 0 || m.avail[b.ID] != nil || m.availPending[b.ID] || m.availErr[b.ID] != nil {
+			continue
+		}
+		m.availPending[b.ID] = true
+		cmds = append(cmds, m.fetchAvail(b.ID))
+	}
+	return tea.Batch(cmds...)
+}
+
+// --- update -----------------------------------------------------------------
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.input.SetWidth(max(10, min(60, m.width-8)))
+		m.vp.SetWidth(m.width)
+		m.vp.SetHeight(m.bodyHeight())
+		m.clampScroll()
+		if m.screen == detailScreen {
+			m.refreshDetail()
+		}
+		return m, m.prefetchVisible()
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+
+	case locationsMsg:
+		for _, l := range msg.locs {
+			if l.Code == m.home {
+				m.homeName = l.Name
+			}
+		}
+		return m, nil
+
+	case searchMsg:
+		if msg.seq != m.searchSeq {
+			return m, nil
+		}
+		m.searching, m.loadingMore = false, false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		if msg.more {
+			m.results = append(m.results, msg.res.Bibs...)
+		} else {
+			m.results = msg.res.Bibs
+			m.cursor, m.offset = 0, 0
+			m.screen = resultsScreen
+			m.input.Blur()
+		}
+		m.total, m.page, m.pages = msg.res.Total, msg.res.Page, msg.res.Pages
+		return m, m.prefetchVisible()
+
+	case availMsg:
+		delete(m.availPending, msg.id)
+		if msg.err != nil {
+			m.availErr[msg.id] = msg.err
+		} else {
+			delete(m.availErr, msg.id)
+			m.avail[msg.id] = msg.a
+		}
+		if m.screen == detailScreen && m.selected.ID == msg.id {
+			m.refreshDetail()
+		}
+		return m, nil
+
+	case detailsMsg:
+		if msg.err != nil {
+			m.detailsErr[msg.id] = msg.err
+		} else {
+			m.details[msg.id] = msg.d
+		}
+		if m.screen == detailScreen && m.selected.ID == msg.id {
+			m.refreshDetail()
+		}
+		return m, nil
+
+	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		switch m.screen {
+		case searchScreen:
+			return m.updateSearch(msg)
+		case resultsScreen:
+			return m.updateResults(msg)
+		case detailScreen:
+			return m.updateDetail(msg)
+		}
+	}
+
+	if m.screen == searchScreen {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		q := strings.TrimSpace(m.input.Value())
+		if q == "" || m.searching {
+			return m, nil
+		}
+		m.searchSeq++
+		m.searching = true
+		m.err = nil
+		m.query, m.qtype = q, searchTypes[m.typeIdx]
+		return m, m.doSearch(m.searchSeq, m.query, m.qtype, 1, false)
+	case "tab":
+		m.typeIdx = (m.typeIdx + 1) % len(searchTypes)
+		return m, nil
+	case "shift+tab":
+		m.typeIdx = (m.typeIdx + len(searchTypes) - 1) % len(searchTypes)
+		return m, nil
+	case "esc":
+		if len(m.results) > 0 {
+			m.screen = resultsScreen
+			m.input.Blur()
+			return m, nil
+		}
+		return m, tea.Quit
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	page := max(1, m.listHeight())
+	switch msg.String() {
+	case "q":
+		return m, tea.Quit
+	case "/", "s", "esc":
+		return m, m.toSearch()
+	case "up", "k":
+		m.cursor--
+	case "down", "j":
+		m.cursor++
+	case "pgup", "ctrl+u":
+		m.cursor -= page
+	case "pgdown", "ctrl+d", "space":
+		m.cursor += page
+	case "home", "g":
+		m.cursor = 0
+	case "end", "G":
+		m.cursor = len(m.results) - 1
+	case "enter", "right", "l":
+		if len(m.results) > 0 {
+			return m.openDetail()
+		}
+		return m, nil
+	default:
+		return m, nil
+	}
+	m.clampScroll()
+	return m, tea.Batch(m.prefetchVisible(), m.maybeLoadMore())
+}
+
+func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q":
+		return m, tea.Quit
+	case "esc", "backspace", "left", "h":
+		m.screen = resultsScreen
+		return m, nil
+	case "/", "s":
+		return m, m.toSearch()
+	case "r":
+		// The client caches availability for a minute, so this is cheap to mash.
+		if !m.availPending[m.selected.ID] {
+			m.availPending[m.selected.ID] = true
+			m.refreshDetail()
+			return m, m.fetchAvail(m.selected.ID)
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+	return m, cmd
+}
+
+func (m *Model) toSearch() tea.Cmd {
+	m.screen = searchScreen
+	m.input.CursorEnd()
+	return m.input.Focus()
+}
+
+func (m Model) openDetail() (tea.Model, tea.Cmd) {
+	m.selected = m.results[m.cursor]
+	m.screen = detailScreen
+	id := m.selected.ID
+	var cmds []tea.Cmd
+	if !m.availPending[id] {
+		m.availPending[id] = true
+		cmds = append(cmds, m.fetchAvail(id))
+	}
+	if m.details[id] == nil {
+		delete(m.detailsErr, id)
+		cmds = append(cmds, m.fetchDetails(id))
+	}
+	m.refreshDetail()
+	m.vp.GotoTop()
+	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) refreshDetail() {
+	m.vp.SetContent(m.renderDetail())
+}
+
+// maybeLoadMore fetches the next page when the cursor nears the end.
+func (m *Model) maybeLoadMore() tea.Cmd {
+	if m.loadingMore || m.searching || m.page >= m.pages || m.cursor < len(m.results)-5 {
+		return nil
+	}
+	m.loadingMore = true
+	return m.doSearch(m.searchSeq, m.query, m.qtype, m.page+1, true)
+}
+
+func (m *Model) clampScroll() {
+	m.cursor = max(0, min(m.cursor, len(m.results)-1))
+	h := max(1, m.listHeight())
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+h {
+		m.offset = m.cursor - h + 1
+	}
+	m.offset = max(0, min(m.offset, len(m.results)-h))
+}
