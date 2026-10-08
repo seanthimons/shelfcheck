@@ -61,6 +61,9 @@ func (m Model) navKey(key string) (Model, tea.Cmd, bool) {
 	case "alt+p":
 		mm, cmd := m.openForYou()
 		return mm, cmd, true
+	case "alt+t":
+		mm, cmd := m.cycleTheme()
+		return mm, cmd, true
 	}
 	if m.screen == searchScreen || m.panel != panelClosed {
 		return m, nil, false
@@ -81,6 +84,9 @@ func (m Model) navKey(key string) (Model, tea.Cmd, bool) {
 			mm, cmd := m.openForYou()
 			return mm, cmd, true
 		}
+	case "t":
+		mm, cmd := m.cycleTheme()
+		return mm, cmd, true
 	}
 	return m, nil, false
 }

@@ -14,22 +14,18 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/theme"
 )
 
-// ANSI palette colors, so the UI follows the terminal's own theme.
+// Styles, set from the current theme by ApplyTheme. The default theme
+// uses ANSI palette colors, so the UI follows the terminal's own.
 var (
-	accentStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	titleStyle   = lipgloss.NewStyle().Bold(true)
-	headingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	dimStyle     = lipgloss.NewStyle().Faint(true)
-	okStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	errStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	starStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	selStyle     = lipgloss.NewStyle().Reverse(true)
-	tabOnStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Underline(true)
-	barStyle     = lipgloss.NewStyle().Faint(true)
+	accentStyle, titleStyle, headingStyle, dimStyle, okStyle, warnStyle,
+	errStyle, starStyle, selStyle, tabOnStyle, barStyle, barWarnStyle,
+	sigilStyle lipgloss.Style
 )
+
+func init() { ApplyTheme(theme.Theme{Name: theme.Terminal}) }
 
 func (m Model) bodyHeight() int { return max(1, m.height-2) }
 func (m Model) listHeight() int { return max(1, m.bodyHeight()-2) }
@@ -56,11 +52,17 @@ func (m Model) View() tea.View {
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, m.viewHeader(), body, m.viewFooter()))
 	v.AltScreen = true
 	v.WindowTitle = "shelfcheck"
+	if t := m.theme(); t.BG != "" {
+		v.BackgroundColor = lipgloss.Color(t.BG)
+	}
+	if t := m.theme(); t.FG != "" {
+		v.ForegroundColor = lipgloss.Color(t.FG)
+	}
 	return v
 }
 
 func (m Model) viewHeader() string {
-	left := accentStyle.Bold(true).Render("shelfcheck") + dimStyle.Render(" "+buildStamp+" · "+m.client.Library)
+	left := sigilStyle.Render("shelfcheck") + dimStyle.Render(" "+buildStamp+" · "+m.client.Library)
 	right := dimStyle.Render("home: ") + m.homeName
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -108,7 +110,7 @@ func (m Model) viewFooter() string {
 	var keys string
 	switch m.screen {
 	case searchScreen:
-		keys = "enter search (or paste a Hardcover prompt/list link) · tab type · alt+p for you · alt+w wishlist · alt+m account"
+		keys = "enter search (or paste a Hardcover prompt/list link) · tab type · alt+p for you · alt+w wishlist · alt+m account · alt+t theme"
 		if len(m.results) > 0 {
 			keys += " · esc back to results"
 		} else {
@@ -137,14 +139,25 @@ func (m Model) viewFooter() string {
 	case wishlistScreen:
 		keys = "↑↓ move · enter open · A show all · r recheck · p for you · m account · / search · q quit"
 	}
-	line := barStyle.Render(keys)
+	// The bar is plain text in bar styles, padded to the full width, so a
+	// theme's bar color runs edge to edge.
+	lead, leadStyle := "", barStyle
 	switch {
 	case m.err != nil:
-		line = errStyle.Render("error: "+m.err.Error()) + "  " + line
+		lead, leadStyle = "error: "+m.err.Error()+"  ", barWarnStyle
+	case m.flash != "":
+		lead = m.flash + "  "
 	case m.loadingMore:
-		line = m.spin.View() + dimStyle.Render(" loading more… ") + line
+		lead = ansi.Strip(m.spin.View()) + " loading more…  "
 	}
-	return ansi.Truncate(line, max(1, m.width), "…")
+	w := max(1, m.width)
+	lead = ansi.Truncate(lead, w, "…")
+	rest := max(0, w-ansi.StringWidth(lead))
+	bar := barStyle.Width(rest).Render(ansi.Truncate(keys, rest, "…"))
+	if lead == "" {
+		return bar
+	}
+	return leadStyle.Render(lead) + bar
 }
 
 // --- search -----------------------------------------------------------------

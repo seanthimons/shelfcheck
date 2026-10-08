@@ -16,6 +16,7 @@ import (
 	bc "shelfcheck/internal/bibliocommons"
 	"shelfcheck/internal/libby"
 	"shelfcheck/internal/recommend"
+	"shelfcheck/internal/theme"
 )
 
 type screen int
@@ -109,6 +110,12 @@ type Model struct {
 	recCursor  int
 
 	hc hcState // Hardcover prompt or list; see hardcover.go
+
+	// Themes to switch between with t; see theme.go.
+	themes    []theme.Theme
+	themeIdx  int
+	saveTheme func(name string) error
+	flash     string // a one-off footer message, cleared by the next key
 
 	vp   viewport.Model
 	spin spinner.Model
@@ -325,6 +332,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
+		m.flash = ""
 		if mm, cmd, ok := m.navKey(msg.String()); ok {
 			return mm, cmd
 		}

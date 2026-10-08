@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"shelfcheck/internal/account"
 
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/theme"
 )
 
 func TestYearOf(t *testing.T) {
@@ -88,5 +90,19 @@ func TestBestMatchPrefersPrint(t *testing.T) {
 	}
 	if _, ok := bestMatch(account.WishItem{}); ok {
 		t.Error("bestMatch on unavailable item")
+	}
+}
+
+func TestFooterSpansWidthInEveryTheme(t *testing.T) {
+	defer ApplyTheme(theme.Theme{Name: theme.Terminal})
+	for _, th := range theme.Builtins() {
+		ApplyTheme(th)
+		m := Model{width: 80, screen: resultsScreen, client: bc.New("x")}
+		for _, err := range []error{nil, errors.New("something broke")} {
+			m.err = err
+			if w := ansi.StringWidth(m.viewFooter()); w != 80 {
+				t.Errorf("%s theme, err=%v: footer is %d wide, want 80", th.Name, err, w)
+			}
+		}
 	}
 }

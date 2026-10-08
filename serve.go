@@ -45,12 +45,21 @@ func serve(args []string) error {
 		return err
 	}
 
+	// Sessions share the styles, so the theme is set once, here.
+	themes, cur, err := pickTheme(o.theme)
+	if err != nil {
+		return err
+	}
+	tui.ApplyTheme(themes[cur])
+	only := themes[cur : cur+1]
+
 	// One client for every session, so they share its cache and throttle.
 	client := bibliocommons.New(o.library)
 
 	handler := func(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
 		// No account screens over SSH yet: the patron's files aren't deployed.
-		return tui.New(client, o.home, !o.anywhere, strings.Join(sess.Command(), " "), nil), nil
+		m := tui.New(client, o.home, !o.anywhere, strings.Join(sess.Command(), " "), nil)
+		return m.WithThemes(only, 0, nil), nil
 	}
 
 	srv, err := wish.NewServer(
