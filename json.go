@@ -23,6 +23,9 @@ commands:
   search [flags] <query...>   search the catalog
   book [flags] <id...>        full record, copies and reviews for bib IDs from search
   branches                    branch codes, addresses and hours
+  history                     your borrowing history, newest first    (needs shelfcheck login)
+  checkouts                   your current loans, incl. Libby/OverDrive (needs shelfcheck login)
+  holds                       your holds, incl. Libby/OverDrive        (needs shelfcheck login)
 
 Run "shelfcheck json <command> -h" for a command's flags.
 `
@@ -42,6 +45,8 @@ func jsonCmd(args []string) error {
 		err = jsonBook(ctx, args[1:])
 	case "branches":
 		err = jsonBranches(ctx, args[1:])
+	case "history", "checkouts", "holds":
+		err = jsonPatron(ctx, args[0], args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], jsonUsage)
 	}
@@ -428,6 +433,73 @@ func jsonBranches(ctx context.Context, args []string) error {
 			}
 		}
 		out = append(out, b)
+	}
+	return writeJSON(out)
+}
+
+// --- patron (logged in) -----------------------------------------------------
+
+type patronItemOut struct {
+	bookOut
+	CheckedOut string `json:"checked_out,omitempty"`
+	Returned   string `json:"returned,omitempty"`
+	Due        string `json:"due,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Position   int    `json:"hold_position,omitempty"`
+	Placed     string `json:"hold_placed,omitempty"`
+	Renewed    int    `json:"times_renewed,omitempty"`
+}
+
+func jsonPatron(ctx context.Context, what string, args []string) error {
+	fs := flag.NewFlagSet("json "+what, flag.ContinueOnError)
+	var o options
+	o.registerCatalog(fs)
+	var files sessionFiles
+	files.register(fs)
+	full := fs.Bool("full", false, "include descriptions and subjects")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	client := bc.New(o.library)
+	out := []patronItemOut{}
+	item := func(b bc.Bib) patronItemOut {
+		bo := newBookOut(o.library, b)
+		if !*full {
+			bo.Description, bo.Subjects, bo.ISBNs = "", nil, nil
+		}
+		return patronItemOut{bookOut: bo}
+	}
+	err := files.withSession(ctx, client, func(s *bc.Session) error {
+		out = out[:0]
+		switch what {
+		case "history":
+			items, err := client.History(ctx, s)
+			for _, h := range items {
+				it := item(h.Bib)
+				it.CheckedOut, it.Returned = h.CheckedOut, h.Returned
+				out = append(out, it)
+			}
+			return err
+		case "checkouts":
+			items, err := client.Checkouts(ctx, s)
+			for _, c := range items {
+				it := item(c.Bib)
+				it.Due, it.Status, it.Renewed, it.Digital = c.Due, c.Status, c.Renewed, c.Digital || it.Digital
+				out = append(out, it)
+			}
+			return err
+		default:
+			items, err := client.Holds(ctx, s)
+			for _, h := range items {
+				it := item(h.Bib)
+				it.Status, it.Position, it.Placed, it.Digital = h.Status, h.Position, h.Placed, h.Digital || it.Digital
+				out = append(out, it)
+			}
+			return err
+		}
+	})
+	if err != nil {
+		return err
 	}
 	return writeJSON(out)
 }

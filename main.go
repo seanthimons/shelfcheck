@@ -4,6 +4,7 @@
 //	shelfcheck alien clay       search right away
 //	shelfcheck serve            serve the same UI over SSH (see serve.go)
 //	shelfcheck json ...         JSON output for scripts and agents (see json.go)
+//	shelfcheck login            sign in with a library card for history, loans and holds (see login.go)
 package main
 
 import (
@@ -43,6 +44,8 @@ func main() {
 			run = serve
 		case "json":
 			run = jsonCmd
+		case "login":
+			run = loginCmd
 		}
 		if run != nil {
 			if err := run(os.Args[2:]); err != nil {

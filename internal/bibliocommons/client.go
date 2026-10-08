@@ -33,6 +33,7 @@ const (
 // Client talks to one library's catalog. It is safe for concurrent use.
 type Client struct {
 	BaseURL   string
+	Site      string // catalog website for logins; defaults to https://<Library>.bibliocommons.com
 	Library   string // e.g. "cincinnatilibrary"
 	UserAgent string
 	HTTP      *http.Client
@@ -75,47 +76,62 @@ func (e *APIError) Error() string {
 // getJSON fetches path (relative to the library root) with query params and
 // decodes the response into out, serving from cache when fresh.
 func (c *Client) getJSON(ctx context.Context, path string, params url.Values, ttl time.Duration, out any) error {
-	if params == nil {
-		params = url.Values{}
-	}
-	params.Set("locale", "en-US")
-	u := fmt.Sprintf("%s/%s/%s?%s", c.BaseURL, url.PathEscape(c.Library), path, params.Encode())
-
+	u := c.gatewayURL(path, params)
 	if body, ok := c.cached(u); ok {
 		return json.Unmarshal(body, out)
 	}
-
-	if err := c.wait(ctx); err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	body, err := c.fetch(ctx, u, nil)
 	if err != nil {
 		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", c.UserAgent)
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("bibliocommons: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return fmt.Errorf("bibliocommons: reading %s: %w", u, err)
-	}
-	if resp.StatusCode/100 != 2 {
-		snippet := string(body)
-		if len(snippet) > 200 {
-			snippet = snippet[:200]
-		}
-		return &APIError{Status: resp.StatusCode, URL: u, Body: snippet}
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("bibliocommons: decoding %s: %w", u, err)
 	}
 	c.store(u, body, ttl)
 	return nil
+}
+
+func (c *Client) gatewayURL(path string, params url.Values) string {
+	if params == nil {
+		params = url.Values{}
+	}
+	params.Set("locale", "en-US")
+	return fmt.Sprintf("%s/%s/%s?%s", c.BaseURL, url.PathEscape(c.Library), path, params.Encode())
+}
+
+// fetch GETs u (throttled, uncached) with optional extra headers and returns
+// the body of a 2xx response.
+func (c *Client) fetch(ctx context.Context, u string, header http.Header) ([]byte, error) {
+	if err := c.wait(ctx); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range header {
+		req.Header[k] = v
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.UserAgent)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("bibliocommons: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("bibliocommons: reading %s: %w", u, err)
+	}
+	if resp.StatusCode/100 != 2 {
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, &APIError{Status: resp.StatusCode, URL: u, Body: snippet}
+	}
+	return body, nil
 }
 
 func (c *Client) cached(key string) ([]byte, bool) {
