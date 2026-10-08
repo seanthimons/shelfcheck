@@ -31,6 +31,7 @@ type Model struct {
 	client   *bc.Client
 	home     string // home branch code
 	homeName string
+	branches map[string]string // code -> name
 
 	screen        screen
 	width, height int
@@ -41,7 +42,7 @@ type Model struct {
 	// Current search.
 	q           bc.Query
 	results     []bc.Bib
-	genres      []bc.Facet // top genres across the current search
+	facets      map[string][]bc.Facet // refinements for the current search
 	total       int
 	page, pages int
 	cursor      int
@@ -50,9 +51,11 @@ type Model struct {
 	searching   bool
 	loadingMore bool
 
-	// Genre filter picker, opened with f on the results screen.
-	picking    bool
-	pickCursor int
+	// Filter panel, opened with f on the results screen; see filters.go.
+	panel     panelState
+	draft     bc.Query
+	catCursor int
+	valCursor int
 
 	// Per-bib data, shared by the results list (home-branch marker) and the
 	// detail screen.
@@ -104,6 +107,7 @@ func New(client *bc.Client, home, query string) Model {
 		client:       client,
 		home:         home,
 		homeName:     "branch " + home,
+		branches:     map[string]string{},
 		input:        in,
 		avail:        map[string]*bc.Availability{},
 		availPending: map[string]bool{},
@@ -209,6 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case locationsMsg:
 		for _, l := range msg.locs {
+			m.branches[l.Code] = l.Name
 			if l.Code == m.home {
 				m.homeName = l.Name
 			}
@@ -229,7 +234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.results = append(m.results, msg.res.Bibs...)
 		} else {
 			m.results = msg.res.Bibs
-			m.genres = msg.res.Genres
+			m.facets = msg.res.Facets
 			m.cursor, m.offset = 0, 0
 			m.screen = resultsScreen
 			m.input.Blur()
@@ -315,23 +320,21 @@ func (m Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.picking {
-		return m.updatePicker(msg)
+	if m.panel != panelClosed {
+		return m.updatePanel(msg)
 	}
 	page := max(1, m.listHeight())
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
 	case "f":
-		if len(m.genres) > 0 || m.q.Genre != "" {
-			m.picking, m.pickCursor = true, 0
-		}
-		return m, nil
+		return m.openPanel(), nil
 	case "F":
-		if m.q.Genre != "" {
-			return m.applyGenre("")
-		}
-		return m, nil
+		return m.runQuery(bc.Query{Text: m.q.Text, Type: m.q.Type})
+	case "a":
+		return m.toggleHome()
+	case "o":
+		return m.cycleSort()
 	case "/", "s", "esc":
 		return m, m.toSearch()
 	case "up", "k":
@@ -356,42 +359,6 @@ func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.clampScroll()
 	return m, tea.Batch(m.prefetchVisible(), m.maybeLoadMore())
-}
-
-// pickerOptions is "All genres" (clears the filter) followed by the facets.
-func (m Model) pickerOptions() []bc.Facet {
-	return append([]bc.Facet{{Value: ""}}, m.genres...)
-}
-
-func (m Model) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	opts := m.pickerOptions()
-	switch msg.String() {
-	case "q":
-		return m, tea.Quit
-	case "esc", "f":
-		m.picking = false
-	case "up", "k":
-		m.pickCursor = max(0, m.pickCursor-1)
-	case "down", "j":
-		m.pickCursor = min(len(opts)-1, m.pickCursor+1)
-	case "enter":
-		m.picking = false
-		return m.applyGenre(opts[m.pickCursor].Value)
-	}
-	return m, nil
-}
-
-// applyGenre reruns the current search narrowed to genre ("" clears it).
-func (m Model) applyGenre(genre string) (tea.Model, tea.Cmd) {
-	if genre == m.q.Genre {
-		return m, nil
-	}
-	m.q.Genre = genre
-	m.searchSeq++
-	m.searching = true
-	m.loadingMore = false
-	m.err = nil
-	return m, m.doSearch(m.searchSeq, m.q, 1, false)
 }
 
 func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

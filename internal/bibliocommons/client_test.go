@@ -105,8 +105,12 @@ func TestSearchGenres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Genres) == 0 || res.Genres[0].Value == "" || res.Genres[0].Count == 0 {
-		t.Fatalf("genres = %+v", res.Genres)
+	g := res.Facets[FacetGenre]
+	if len(g) == 0 || g[0].Value == "" || g[0].Count == 0 {
+		t.Fatalf("genres = %+v", g)
+	}
+	if len(res.Facets[FacetFormat]) == 0 {
+		t.Fatalf("formats = %+v", res.Facets[FacetFormat])
 	}
 }
 
@@ -121,18 +125,41 @@ func TestSearchParams(t *testing.T) {
 	c.BaseURL = srv.URL
 	ctx := context.Background()
 
-	if _, err := c.Search(ctx, Query{Text: "space (operas)", Type: Genre, Genre: "Fiction"}, 2); err != nil {
+	q := Query{Text: "space (operas)", Type: Genre, Sort: SortRating}
+	q.Toggle(FacetGenre, "Fiction")
+	q.Toggle(FacetFormat, "EBOOK")
+	q.Toggle(FacetFormat, "BK")
+	if _, err := c.Search(ctx, q, 2); err != nil {
 		t.Fatal(err)
 	}
 	if got.Get("searchType") != "bl" || got.Get("query") != "genre:(space  operas )" ||
-		got.Get("f_GENRE_HEADINGS") != "Fiction" || got.Get("page") != "2" {
+		got.Get("f_GENRE_HEADINGS") != "Fiction" || got.Get("page") != "2" || got.Get("sort") != "ugc_rating" ||
+		strings.Join(got["f_FORMAT"], ",") != "BK,EBOOK" {
 		t.Errorf("params = %v", got)
 	}
 	if _, err := c.Search(ctx, Query{Text: "dune", Type: Title}, 1); err != nil {
 		t.Fatal(err)
 	}
-	if got.Get("searchType") != "title" || got.Get("query") != "dune" || got.Has("f_GENRE_HEADINGS") || got.Has("page") {
+	if got.Get("searchType") != "title" || got.Get("query") != "dune" || got.Has("f_GENRE_HEADINGS") || got.Has("page") || got.Has("sort") {
 		t.Errorf("params = %v", got)
+	}
+}
+
+func TestQueryToggleClone(t *testing.T) {
+	var q Query
+	q.Toggle(FacetFormat, "BK")
+	c := q.Clone()
+	c.Toggle(FacetFormat, "EBOOK")
+	c.Toggle(FacetFormat, "BK")
+	if !q.Has(FacetFormat, "BK") || q.Has(FacetFormat, "EBOOK") || len(q.Filters[FacetFormat]) != 1 {
+		t.Errorf("clone changed original: %v", q.Filters)
+	}
+	if c.Has(FacetFormat, "BK") || !c.Has(FacetFormat, "EBOOK") {
+		t.Errorf("clone = %v", c.Filters)
+	}
+	c.Toggle(FacetFormat, "EBOOK")
+	if c.Narrowed() {
+		t.Errorf("empty field not removed: %v", c.Filters)
 	}
 }
 
@@ -311,13 +338,27 @@ func TestLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scifi, err := c.Search(ctx, Query{Text: "tchaikovsky", Genre: "Science fiction"}, 1)
-	if err != nil {
-		t.Fatal(err)
+	t.Logf("tchaikovsky: %d results", all.Total)
+	for _, f := range []struct{ field, value string }{
+		{FacetGenre, "Science fiction"}, {FacetFormat, "BK"}, {FacetStatus, "1"}, {FacetRating, "FOUR_PLUS_STARS"},
+	} {
+		q := Query{Text: "tchaikovsky"}
+		q.Toggle(f.field, f.value)
+		res, err := c.Search(ctx, q, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("  %s=%s -> %d", f.field, f.value, res.Total)
+		if res.Total == 0 || res.Total >= all.Total {
+			t.Errorf("%s filter didn't narrow results: %d -> %d", f.field, all.Total, res.Total)
+		}
 	}
-	t.Logf("tchaikovsky: %d results, %d with genre filter; top genres %v", all.Total, scifi.Total, all.Genres[:min(4, len(all.Genres))])
-	if len(all.Genres) == 0 || scifi.Total == 0 || scifi.Total >= all.Total {
-		t.Errorf("genre filter didn't narrow results: %d -> %d", all.Total, scifi.Total)
+	for _, s := range []string{SortRating, SortPublished, SortNewlyAcquired, SortTitle, SortAuthor} {
+		res, err := c.Search(ctx, Query{Text: "tchaikovsky", Sort: s}, 1)
+		if err != nil {
+			t.Fatalf("sort %s: %v", s, err)
+		}
+		t.Logf("  sort %-15s first: %q", s, res.Bibs[0].Title)
 	}
 
 	res, err := c.Search(ctx, Query{Text: "alien clay"}, 1)

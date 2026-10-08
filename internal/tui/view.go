@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -70,12 +71,15 @@ func (m Model) viewFooter() string {
 		}
 	case resultsScreen:
 		switch {
-		case m.picking:
-			keys = "↑↓ move · enter apply · esc cancel"
-		case m.q.Genre != "":
-			keys = "↑↓ move · enter open · f genre · F clear genre · / new search · q quit"
+		case m.panel == panelCategories:
+			keys = "↑↓ move · enter choose · x clear one · c clear all · esc apply"
+		case m.panel == panelValues:
+			keys = "↑↓ move · space/enter toggle · esc back"
 		default:
-			keys = "↑↓ move · enter open · f filter by genre · / new search · q quit"
+			keys = "enter open · f filters · a on shelf at home · o sort · / search · q quit"
+			if m.q.Narrowed() || m.q.Sort != "" {
+				keys = "enter open · f filters · F clear · a at home · o sort · / search · q quit"
+			}
 		}
 	case detailScreen:
 		keys = "↑↓ scroll · r refresh · esc back · / search · q quit"
@@ -123,20 +127,18 @@ func (m Model) viewResults() string {
 	if m.searching {
 		return "\n  " + m.spin.View() + " Searching…"
 	}
-	if m.picking {
-		return m.viewPicker()
+	if m.panel != panelClosed {
+		return m.viewPanel()
 	}
 	head := fmt.Sprintf("%s for %s", plural(m.total, "result"), titleStyle.Render(fmt.Sprintf("%q", m.q.Text)))
 	if m.q.Type != "" && m.q.Type != bc.Keyword {
 		head += dimStyle.Render(" (" + string(m.q.Type) + ")")
 	}
-	if m.q.Genre != "" {
-		head += dimStyle.Render(" · genre: ") + accentStyle.Render(m.q.Genre)
-	}
+	filters := m.filterSummary(m.q)
 	if len(m.results) == 0 {
 		msg := "\n  No results for " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text))
-		if m.q.Genre != "" {
-			return msg + " in " + m.q.Genre + ". Press F to clear the genre filter."
+		if filters != "" {
+			return msg + " with " + accentStyle.Render(filters) + ".\n  Press f to change filters or F to clear them."
 		}
 		return msg + ". Press / to search again."
 	}
@@ -153,7 +155,7 @@ func (m Model) viewResults() string {
 	}
 	titleW := max(12, m.width-fixed)
 
-	rows := []string{"  " + head, ""}
+	rows := []string{"  " + head, "  " + accentStyle.Render(ansi.Truncate(filters, max(1, m.width-4), "…"))}
 	end := min(len(m.results), m.offset+m.listHeight())
 	for i := m.offset; i < end; i++ {
 		b := m.results[i]
@@ -167,7 +169,7 @@ func (m Model) viewResults() string {
 		}
 		cols = append(cols,
 			pad(formatLabel(b.Format), formatW),
-			pad(b.Year, yearW),
+			pad(yearOf(b.Year), yearW),
 			pad(ratingShort(b.Rating), ratingW),
 			pad(availShort(b.Summary), availW),
 			pad(m.homeMarker(b), homeW),
@@ -177,34 +179,6 @@ func (m Model) viewResults() string {
 			rows = append(rows, accentStyle.Render("▸ ")+selStyle.Render(ansi.Strip(line)))
 		} else {
 			rows = append(rows, "  "+m.styleRow(b, line))
-		}
-	}
-	return strings.Join(rows, "\n")
-}
-
-func (m Model) viewPicker() string {
-	rows := []string{"  Filter " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text)) + " by genre", ""}
-	opts := m.pickerOptions()
-	countW := len(fmt.Sprint(m.total))
-	nameW := max(10, min(50, m.width-countW-8))
-	// Keep the cursor on screen if the list is taller than the window.
-	h := m.listHeight()
-	start := max(0, min(m.pickCursor-h+1, len(opts)-h))
-	for i := start; i < min(len(opts), start+h); i++ {
-		o := opts[i]
-		name, count := o.Value, fmt.Sprint(o.Count)
-		if name == "" {
-			name, count = "All genres", ""
-		}
-		mark := "  "
-		if o.Value == m.q.Genre {
-			mark = okStyle.Render("✓ ")
-		}
-		line := pad(name, nameW) + " " + fmt.Sprintf("%*s", countW, count)
-		if i == m.pickCursor {
-			rows = append(rows, accentStyle.Render("▸ ")+mark+selStyle.Render(line))
-		} else {
-			rows = append(rows, "  "+mark+line)
 		}
 	}
 	return strings.Join(rows, "\n")
@@ -411,6 +385,9 @@ var formatLabels = map[string]string{
 	"BLURAY":        "Blu-ray",
 	"MUSIC_CD":      "Music CD",
 	"LP":            "Vinyl",
+	"MN":            "Sheet music",
+	"UK":            "Other",
+	"PICTURE_BOOK":  "Picture book",
 	"MAG":           "Magazine",
 	"EMAG":          "eMagazine",
 	"VIDEO_ONLINE":  "Streaming video",
@@ -449,6 +426,17 @@ func titleCase(code string) string {
 		words[i] = strings.ToUpper(w[:1]) + w[1:]
 	}
 	return strings.Join(words, " ")
+}
+
+var yearRe = regexp.MustCompile(`\d{4}`)
+
+// yearOf returns the first four-digit year in a publication date, which can
+// look like "2024", "1978-1992" or "20261006".
+func yearOf(date string) string {
+	if y := yearRe.FindString(date); y != "" {
+		return y
+	}
+	return date
 }
 
 func availShort(s bc.Summary) string {

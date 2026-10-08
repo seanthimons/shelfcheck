@@ -35,8 +35,13 @@ func (c *Client) Search(ctx context.Context, q Query, page int) (*SearchResult, 
 		params.Set("query", "genre:("+strings.NewReplacer("(", " ", ")", " ", `"`, " ").Replace(text)+")")
 		params.Set("searchType", "bl")
 	}
-	if q.Genre != "" {
-		params.Set("f_GENRE_HEADINGS", q.Genre)
+	for field, values := range q.Filters {
+		vs := append([]string(nil), values...)
+		sort.Strings(vs) // stable cache keys
+		params["f_"+field] = vs
+	}
+	if q.Sort != "" {
+		params.Set("sort", q.Sort)
 	}
 	if page > 1 {
 		params.Set("page", strconv.Itoa(page))
@@ -48,12 +53,10 @@ func (c *Client) Search(ctx context.Context, q Query, page int) (*SearchResult, 
 	}
 	p := raw.CatalogSearch.Pagination
 	res := &SearchResult{Query: q, Page: p.Page, Pages: p.Pages, Total: p.Count}
+	res.Facets = map[string][]Facet{}
 	for _, f := range raw.CatalogSearch.Fields {
-		if f.ID != "GENRE_HEADINGS" {
-			continue
-		}
 		for _, ff := range f.FieldFilters {
-			res.Genres = append(res.Genres, Facet{Value: ff.Value, Count: ff.Count})
+			res.Facets[f.ID] = append(res.Facets[f.ID], Facet{Value: ff.Value, Count: ff.Count})
 		}
 	}
 	for _, r := range raw.CatalogSearch.Results {

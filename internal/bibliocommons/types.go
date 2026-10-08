@@ -61,10 +61,76 @@ const (
 type Query struct {
 	Text string
 	Type SearchType
-	// Genre, if set, narrows results to one genre heading exactly as it
-	// appears in SearchResult.Genres, e.g. "Science fiction".
-	Genre string
+	// Filters narrows results by facet field (e.g. FacetFormat) to the given
+	// values, as they appear in SearchResult.Facets. Values within a field
+	// are ORed; fields are ANDed.
+	Filters map[string][]string
+	Sort    string // "" for relevance, or one of the Sort* constants
 }
+
+// Facet fields usable in Query.Filters.
+const (
+	FacetStatus   = "STATUS" // a branch code (on shelf there), "_physical_" or "_online_"
+	FacetFormat   = "FORMAT"
+	FacetGenre    = "GENRE_HEADINGS"
+	FacetRating   = "UGC_RATING" // "FOUR_PLUS_STARS", "THREE_PLUS_STARS", ...
+	FacetFiction  = "FICTION_TYPE"
+	FacetAudience = "AUDIENCE"
+	FacetNew      = "NEWLY_ACQUIRED" // "PAST_30_DAYS", ...
+	FacetYear     = "PUBLISHED_DATE"
+	FacetLanguage = "PRIMARY_LANGUAGE"
+	FacetAuthor   = "AUTHOR"
+)
+
+const (
+	SortRelevance     = ""
+	SortRating        = "ugc_rating"
+	SortPublished     = "published_date"
+	SortNewlyAcquired = "newly_acquired"
+	SortTitle         = "title"
+	SortAuthor        = "author"
+)
+
+// Clone returns a copy whose Filters can be changed without affecting q.
+func (q Query) Clone() Query {
+	c := q
+	c.Filters = make(map[string][]string, len(q.Filters))
+	for k, v := range q.Filters {
+		c.Filters[k] = append([]string(nil), v...)
+	}
+	return c
+}
+
+// Has reports whether value is selected for field.
+func (q Query) Has(field, value string) bool {
+	for _, v := range q.Filters[field] {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// Toggle adds or removes value for field. Call it on a Clone.
+func (q *Query) Toggle(field, value string) {
+	if q.Filters == nil {
+		q.Filters = map[string][]string{}
+	}
+	vs := q.Filters[field]
+	for i, v := range vs {
+		if v == value {
+			q.Filters[field] = append(vs[:i:i], vs[i+1:]...)
+			if len(q.Filters[field]) == 0 {
+				delete(q.Filters, field)
+			}
+			return
+		}
+	}
+	q.Filters[field] = append(vs, value)
+}
+
+// Narrowed reports whether any filter is set.
+func (q Query) Narrowed() bool { return len(q.Filters) > 0 }
 
 type SearchResult struct {
 	Query  Query
@@ -72,7 +138,7 @@ type SearchResult struct {
 	Pages  int
 	Total  int
 	Bibs   []Bib
-	Genres []Facet // the most common genres across all results (top 15)
+	Facets map[string][]Facet // by facet field; each lists its most common values
 }
 
 // Facet is one value of a search refinement and how many results have it.
