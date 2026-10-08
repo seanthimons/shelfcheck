@@ -732,7 +732,7 @@ https://hardcover.app/@<user>/lists/<slug>, or a bare prompt slug.`)
 		if err != nil {
 			return err
 		}
-		po := promptBookOut{Title: b.Title, Author: b.Author, Votes: b.Votes, Yours: shelves[b.ID].String(), Available: w.Available()}
+		po := promptBookOut{Title: b.Title, Author: b.Author, Votes: b.Votes, Yours: shelves[b.ID].Status.String(), Available: w.Available()}
 		for _, m := range w.Matches {
 			bo := newBookOut(o.library, m.Bib)
 			bo.Description, bo.Subjects, bo.ISBNs = "", nil, nil

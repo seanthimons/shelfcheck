@@ -2,6 +2,7 @@ package hardcover
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -24,11 +25,11 @@ var statusNames = map[Status]string{
 
 func (s Status) String() string { return statusNames[s] }
 
-// Shelves maps book IDs in the token owner's library to their status.
-func Shelves(lib []UserBook) map[int]Status {
-	m := make(map[int]Status, len(lib))
+// Shelves maps book IDs in the token owner's library to their entries.
+func Shelves(lib []UserBook) map[int]UserBook {
+	m := make(map[int]UserBook, len(lib))
 	for _, ub := range lib {
-		m[ub.ID] = ub.Status
+		m[ub.ID] = ub
 	}
 	return m
 }
@@ -36,10 +37,11 @@ func Shelves(lib []UserBook) map[int]Status {
 // UserBook is a book in the token owner's Hardcover library.
 type UserBook struct {
 	Book
-	Status   Status
-	Rating   float64 // 0.5-5 stars; 0 if unrated
-	Added    string  // YYYY-MM-DD
-	LastRead string  // YYYY-MM-DD finished, if recorded
+	UserBookID int // the library entry, for changing or removing it
+	Status     Status
+	Rating     float64 // 0.5-5 stars; 0 if unrated
+	Added      string  // YYYY-MM-DD
+	LastRead   string  // YYYY-MM-DD finished, if recorded
 }
 
 // Library returns every book in the token owner's Hardcover library.
@@ -50,6 +52,7 @@ func (c *Client) Library(ctx context.Context) ([]UserBook, error) {
 		var raw struct {
 			Me []struct {
 				UserBooks []struct {
+					ID           int      `json:"id"`
 					StatusID     int      `json:"status_id"`
 					Rating       *float64 `json:"rating"`
 					DateAdded    string   `json:"date_added"`
@@ -60,7 +63,7 @@ func (c *Client) Library(ctx context.Context) ([]UserBook, error) {
 		}
 		q := `query($n: Int!, $o: Int!) {
   me { user_books(order_by: {id: asc}, limit: $n, offset: $o) {
-    status_id rating date_added last_read_date book { ` + bookFields + ` }
+    id status_id rating date_added last_read_date book { ` + bookFields + ` }
   } }
 }`
 		if err := c.Query(ctx, q, map[string]any{"n": pageSize, "o": offset}, &raw); err != nil {
@@ -71,7 +74,7 @@ func (c *Client) Library(ctx context.Context) ([]UserBook, error) {
 		}
 		rows := raw.Me[0].UserBooks
 		for _, r := range rows {
-			ub := UserBook{Book: r.Book.book(), Status: Status(r.StatusID), Added: day(r.DateAdded)}
+			ub := UserBook{Book: r.Book.book(), UserBookID: r.ID, Status: Status(r.StatusID), Added: day(r.DateAdded)}
 			if r.Rating != nil {
 				ub.Rating = *r.Rating
 			}
@@ -92,4 +95,42 @@ func day(s string) string {
 		return s[:10]
 	}
 	return s
+}
+
+// AddToShelf puts a book in the token owner's library with the given
+// status (e.g. WantToRead), returning the new library entry's ID.
+func (c *Client) AddToShelf(ctx context.Context, bookID int, status Status) (int, error) {
+	var out struct {
+		Insert struct {
+			ID    int    `json:"id"`
+			Error string `json:"error"`
+		} `json:"insert_user_book"`
+	}
+	const q = `mutation($b: Int!, $s: Int!) {
+  insert_user_book(object: {book_id: $b, status_id: $s}) { id error }
+}`
+	if err := c.Query(ctx, q, map[string]any{"b": bookID, "s": int(status)}, &out); err != nil {
+		return 0, err
+	}
+	if out.Insert.Error != "" {
+		return 0, fmt.Errorf("hardcover: %s", out.Insert.Error)
+	}
+	return out.Insert.ID, nil
+}
+
+// RemoveFromLibrary deletes a library entry (a UserBookID).
+func (c *Client) RemoveFromLibrary(ctx context.Context, userBookID int) error {
+	var out struct {
+		Delete struct {
+			ID *int `json:"id"`
+		} `json:"delete_user_book"`
+	}
+	const q = `mutation($id: Int!) { delete_user_book(id: $id) { id } }`
+	if err := c.Query(ctx, q, map[string]any{"id": userBookID}, &out); err != nil {
+		return err
+	}
+	if out.Delete.ID == nil {
+		return fmt.Errorf("hardcover: library entry %d wasn't removed", userBookID)
+	}
+	return nil
 }

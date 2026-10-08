@@ -18,7 +18,9 @@ import (
 // The Hardcover screen checks a Hardcover prompt's answers ("What is your
 // favorite dark academia book?") or a list's books against the catalog,
 // filling in like the wishlist. Paste a prompt or list URL into the search
-// box, or press h on a "readers also picked" pick.
+// box, or press h on a "readers also picked" pick. + puts the selected book
+// on (or takes it off) the patron's Hardcover Want to Read shelf, which the
+// wishlist reads.
 
 const hcBooks = 30 // books to check
 
@@ -26,8 +28,15 @@ type (
 	hcCollectionMsg struct {
 		seq     int
 		col     hardcover.Collection
-		shelves map[int]hardcover.Status
+		shelves map[int]hardcover.UserBook
 		err     error
+	}
+	hcShelvedMsg struct {
+		seq    int
+		book   hardcover.PromptAnswer
+		entry  hardcover.UserBook // zero if removed
+		remove bool
+		err    error
 	}
 	hcCheckedMsg struct {
 		seq  int
@@ -44,8 +53,10 @@ type hcState struct {
 	loading bool
 	err     error
 	col     *hardcover.Collection
-	shelves map[int]hardcover.Status // the patron's own Hardcover statuses
-	items   []account.WishItem       // checked so far, in collection order
+	shelves map[int]hardcover.UserBook // the patron's own Hardcover library, by book
+	note    string                     // result of the last + (shown until the next key)
+	busy    bool                       // a + is being saved
+	items   []account.WishItem         // checked so far, in collection order
 	failed  int
 	all     bool
 	cursor  int
@@ -123,6 +134,27 @@ func (m Model) handleHardcoverMsg(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.checkHardcover(0)
+	case hcShelvedMsg:
+		if msg.seq != m.hc.seq {
+			return m, nil
+		}
+		m.hc.busy = false
+		switch {
+		case msg.err != nil:
+			m.hc.note = errStyle.Render("Couldn't update Hardcover: " + msg.err.Error())
+			return m, nil
+		case msg.remove:
+			delete(m.hc.shelves, msg.book.ID)
+			m.hc.note = okStyle.Render("Took " + msg.book.Title + " off your Hardcover want to read")
+		default:
+			m.hc.shelves[msg.book.ID] = msg.entry
+			m.hc.note = okStyle.Render("Added " + msg.book.Title + " to your Hardcover want to read")
+		}
+		// The wishlist reads that shelf: check it afresh next time.
+		if !m.wishLoading {
+			m.wishTitles, m.wishItems = nil, nil
+		}
+		return m, nil
 	case hcCheckedMsg:
 		if msg.seq != m.hc.seq {
 			return m, nil
@@ -154,7 +186,14 @@ func (m Model) hcVisible() []int {
 func (m Model) updateHardcover(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	vis := m.hcVisible()
 	h := max(1, m.listHeight())
+	if !m.hc.busy {
+		m.hc.note = ""
+	}
 	switch msg.String() {
+	case "+":
+		if m.hc.cursor < len(vis) && !m.hc.busy {
+			return m.toggleWant(m.hc.col.Books[vis[m.hc.cursor]])
+		}
 	case "q":
 		return m, tea.Quit
 	case "esc":
@@ -204,6 +243,40 @@ func (m Model) updateHardcover(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// toggleWant puts b on the Hardcover Want to Read shelf, or takes it off if
+// it's there. Books on another shelf (read, did not finish...) are left be.
+func (m Model) toggleWant(b hardcover.PromptAnswer) (tea.Model, tea.Cmd) {
+	var hc *hardcover.Client
+	if m.acct != nil {
+		hc = m.acct.HardcoverClient()
+	}
+	entry, has := m.hc.shelves[b.ID]
+	switch {
+	case hc == nil:
+		m.hc.note = errStyle.Render("Set HARDCOVER_TOKEN to change your Hardcover shelves")
+		return m, nil
+	case b.ID == 0:
+		return m, nil
+	case has && entry.Status != hardcover.WantToRead:
+		m.hc.note = dimStyle.Render(b.Title + " is already on your Hardcover as " + entry.Status.String())
+		return m, nil
+	}
+	m.hc.busy = true
+	m.hc.note = dimStyle.Render("Updating Hardcover…")
+	seq := m.hc.seq
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		if has {
+			err := hc.RemoveFromLibrary(ctx, entry.UserBookID)
+			return hcShelvedMsg{seq: seq, book: b, remove: true, err: err}
+		}
+		id, err := hc.AddToShelf(ctx, b.ID, hardcover.WantToRead)
+		return hcShelvedMsg{seq: seq, book: b, err: err,
+			entry: hardcover.UserBook{Book: b.Book, UserBookID: id, Status: hardcover.WantToRead}}
+	}
+}
+
 func (m Model) viewHardcover() string {
 	switch {
 	case m.hc.err != nil && m.hc.col == nil:
@@ -236,6 +309,9 @@ func (m Model) viewHardcover() string {
 	if m.hc.all {
 		sub = "  " + dimStyle.Render("showing every book (A to show only available)")
 	}
+	if m.hc.note != "" {
+		sub = "  " + m.hc.note
+	}
 	rows := []string{head, sub}
 	vis := m.hcVisible()
 	if len(vis) == 0 {
@@ -258,9 +334,9 @@ func (m Model) viewHardcover() string {
 func (m Model) hcLine(i, w int) string {
 	it, b := m.hc.items[i], m.hc.col.Books[i]
 	label := " " // keeps the column when there's nothing to say
-	switch st, ok := m.hc.shelves[b.ID]; {
+	switch ub, ok := m.hc.shelves[b.ID]; {
 	case ok:
-		label = st.String()
+		label = ub.Status.String()
 	case b.Votes == 1:
 		label = "1 pick"
 	case b.Votes > 1:

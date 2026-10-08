@@ -3,7 +3,9 @@ package tui
 import (
 	"fmt"
 	"math"
+	"os"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -58,7 +60,7 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) viewHeader() string {
-	left := accentStyle.Bold(true).Render("shelfcheck") + dimStyle.Render(" · "+m.client.Library)
+	left := accentStyle.Bold(true).Render("shelfcheck") + dimStyle.Render(" "+buildStamp+" · "+m.client.Library)
 	right := dimStyle.Render("home: ") + m.homeName
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -66,6 +68,41 @@ func (m Model) viewHeader() string {
 	}
 	return left + strings.Repeat(" ", gap) + right
 }
+
+// buildStamp names the running build, so a stale copy is easy to spot: the
+// commit (with * when built from uncommitted changes) and when the binary
+// was built (its file time), e.g. "6abcd97* 16:43".
+var buildStamp = func() string {
+	var rev string
+	dirty := false
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, st := range bi.Settings {
+			switch st.Key {
+			case "vcs.revision":
+				rev = st.Value[:min(7, len(st.Value))]
+			case "vcs.modified":
+				dirty = st.Value == "true"
+			}
+		}
+	}
+	if dirty {
+		rev += "*"
+	}
+	if exe, err := os.Executable(); err == nil {
+		if fi, err := os.Stat(exe); err == nil {
+			t := fi.ModTime()
+			layout := "Jan 2 15:04"
+			if t.Format(time.DateOnly) == time.Now().Format(time.DateOnly) {
+				layout = "15:04" // built today
+			}
+			rev = strings.TrimSpace(rev + " " + t.Format(layout))
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	return rev
+}()
 
 func (m Model) viewFooter() string {
 	var keys string
@@ -96,7 +133,7 @@ func (m Model) viewFooter() string {
 	case forYouScreen:
 		keys = "↑↓ move · enter open · h Hardcover prompt/list · r refresh · w wishlist · m account · / search · q quit"
 	case hardcoverScreen:
-		keys = "↑↓ move · enter open · A show all · r recheck · esc back · p for you · w wishlist · / search · q quit"
+		keys = "↑↓ move · enter open · + want to read · A show all · r recheck · esc back · p for you · w wishlist · / search · q quit"
 	case wishlistScreen:
 		keys = "↑↓ move · enter open · A show all · r recheck · p for you · m account · / search · q quit"
 	}

@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -317,7 +318,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case recProgressMsg, recDoneMsg:
 		return m.handleRecMsg(msg)
 
-	case hcCollectionMsg, hcCheckedMsg:
+	case hcCollectionMsg, hcCheckedMsg, hcShelvedMsg:
 		return m.handleHardcoverMsg(msg)
 
 	case tea.KeyPressMsg:
@@ -362,6 +363,10 @@ func (m Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if isHardcoverURL(q) {
 			return m.openHardcover(q, searchScreen)
+		}
+		if strings.Contains(strings.ToLower(q), "hardcover.app") {
+			m.err = fmt.Errorf("not a Hardcover prompt or list link: %q", q)
+			return m, nil
 		}
 		m.searchSeq++
 		m.searching = true

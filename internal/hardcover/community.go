@@ -457,6 +457,9 @@ func (c *Client) ListBySlug(ctx context.Context, owner, slug string, limit int) 
 	return l, true, nil
 }
 
+// linkRe finds a Hardcover link in text.
+var linkRe = regexp.MustCompile(`(?i)(?:https?://)?(?:www\.)?hardcover\.app/[^\s"'<>“”‘’]+`)
+
 // Ref is a prompt or list named by a Hardcover URL.
 type Ref struct {
 	Kind  string // "prompt" or "list"
@@ -466,8 +469,12 @@ type Ref struct {
 
 // ParseRef reads a Hardcover prompt or list URL
 // (hardcover.app/prompts/<slug>, hardcover.app/@<user>/lists/<slug>), or a
-// bare prompt slug.
+// bare prompt slug, ignoring quotes or angle brackets around it.
 func ParseRef(s string) (Ref, bool) {
+	if u := linkRe.FindString(s); u != "" {
+		s = u // the link, wherever it sits in pasted text
+	}
+	s = strings.Trim(strings.TrimSpace(s), "\"'`<>“”‘’") // pasted with quotes or brackets
 	s = strings.TrimSpace(s)
 	if !strings.Contains(s, "/") {
 		if !strings.Contains(s, "-") {
