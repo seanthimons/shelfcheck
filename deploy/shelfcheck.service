@@ -1,0 +1,42 @@
+[Unit]
+Description=shelfcheck: library catalog over SSH
+Documentation=https://github.com/seanthimons/shelfcheck
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+EnvironmentFile=/etc/shelfcheck/env
+ExecStart=/usr/local/bin/shelfcheck serve \
+    -addr ${SHELFCHECK_ADDR} \
+    -host-key /var/lib/shelfcheck/host_ed25519 \
+    -authorized-keys /etc/shelfcheck/authorized_keys
+# The Tailscale address may not exist yet right after boot; keep retrying.
+Restart=always
+RestartSec=5
+
+DynamicUser=yes
+StateDirectory=shelfcheck
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
