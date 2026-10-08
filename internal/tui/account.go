@@ -108,7 +108,7 @@ func (m Model) openBib(b bc.Bib, from screen) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.fetchDetails(id))
 	}
 	m, hcCmd := m.fetchHCInfo()
-	cmds = append(cmds, hcCmd)
+	cmds = append(cmds, hcCmd, m.fetchCover(b.CoverURL))
 	m.refreshDetail()
 	m.vp.GotoTop()
 	return m, tea.Batch(cmds...)
@@ -215,19 +215,19 @@ func (m Model) updateAccount(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) viewAccount() string {
 	switch {
 	case m.acct == nil || !m.acct.HasCatalog():
-		return "\n  " + titleStyle.Render("Your account isn't set up here.") +
-			"\n\n  Put your card number and PIN in ~/.config/shelfcheck/credentials.env\n  (SHELFCHECK_CARD=… and SHELFCHECK_PIN=…), then run: shelfcheck login"
+		return m.notice(titleStyle.Render("Your account isn't set up here.") +
+			"\n\nPut your card number and PIN in ~/.config/shelfcheck/credentials.env\n(SHELFCHECK_CARD=… and SHELFCHECK_PIN=…), then run: shelfcheck login")
 	case m.acctLoading && !m.acctLoaded:
-		return "\n  " + m.spin.View() + " Loading your loans and holds…"
+		return m.notice(m.spin.View() + " Loading your loans and holds…")
 	case m.acctErr != nil && !m.acctLoaded:
-		return "\n  " + errStyle.Render("Couldn't load your account: "+m.acctErr.Error()) + "\n\n  Press r to try again."
+		return m.notice(errStyle.Render("Couldn't load your account: "+m.acctErr.Error()) + "\n\nPress r to try again.")
 	}
 	w := max(20, m.width-4)
 	rows := m.acctRows()
 	var out []string
 	i := 0
 	section := func(title string, n int, empty string) {
-		out = append(out, "", "  "+headingStyle.Render(title)+dimStyle.Render(fmt.Sprintf(" (%d)", n)))
+		out = append(out, "", "  "+sectionHead(title, dimStyle.Render(fmt.Sprintf(" (%d)", n)), w))
 		if n == 0 {
 			out = append(out, dimStyle.Render("    "+empty))
 		}
@@ -245,13 +245,13 @@ func (m Model) viewAccount() string {
 	// Scroll so the cursor's line stays visible.
 	cursorLine := 0
 	for n, l := range out {
-		if strings.HasPrefix(l, accentStyle.Render("▸ ")) {
+		if strings.Contains(l, "▸ ") {
 			cursorLine = n
 		}
 	}
 	h := m.bodyHeight()
 	start := max(0, min(cursorLine-h/2, len(out)-h))
-	return strings.Join(out[start:], "\n")
+	return strings.Join(withScrollbar(out[start:], scrollbar(h, len(out), start), m.width), "\n")
 }
 
 // --- wishlist ---------------------------------------------------------------
@@ -408,12 +408,12 @@ func bestMatch(w account.WishItem) (bc.Bib, bool) {
 func (m Model) viewWishlist() string {
 	switch {
 	case !m.hasWishlist():
-		return "\n  " + titleStyle.Render("No want-to-read list here.") +
-			"\n\n  Link Libby (in Libby: Menu > Copy To Another Device, then run\n  shelfcheck libby link <8-digit code>), or set HARDCOVER_TOKEN for your Hardcover list."
+		return m.notice(titleStyle.Render("No want-to-read list here.") +
+			"\n\nLink Libby (in Libby: Menu > Copy To Another Device, then run\nshelfcheck libby link <8-digit code>), or set HARDCOVER_TOKEN for your Hardcover list.")
 	case m.wishErr != nil && m.wishTitles == nil:
-		return "\n  " + errStyle.Render("Couldn't load your wishlist: "+m.wishErr.Error()) + "\n\n  Press r to try again."
+		return m.notice(errStyle.Render("Couldn't load your wishlist: "+m.wishErr.Error()) + "\n\nPress r to try again.")
 	case m.wishTitles == nil:
-		return "\n  " + m.spin.View() + " Loading your want-to-read list…"
+		return m.notice(m.spin.View() + " Loading your want-to-read list…")
 	}
 
 	items := m.wishVisible()
@@ -439,8 +439,8 @@ func (m Model) viewWishlist() string {
 	if m.wishAll {
 		sub = "  " + dimStyle.Render("showing every title (A to show only available)")
 	}
-	rows := []string{head, sub}
 	if len(items) == 0 {
+		rows := []string{head, sub}
 		if !m.wishLoading {
 			rows = append(rows, "", dimStyle.Render("  Nothing on your list is available right now."))
 		}
@@ -450,10 +450,13 @@ func (m Model) viewWishlist() string {
 	h := m.listHeight()
 	start := max(0, min(m.wishCursor-h+1, len(items)-h))
 	w := max(20, m.width-4)
+	head = spread(head, dimStyle.Render(fmt.Sprintf("%d/%d", m.wishCursor+1, len(items))), m.width-2)
+	rows := []string{head, sub, "  " + bookHeader(w, "")}
+	var list []string
 	for i := start; i < min(len(items), start+h); i++ {
-		rows = append(rows, cursorRow(i == m.wishCursor, wishLine(items[i], w, m.homeName)))
+		list = append(list, cursorRow(i == m.wishCursor, wishLine(items[i], w, m.homeName)))
 	}
-	return strings.Join(rows, "\n")
+	return strings.Join(append(rows, withScrollbar(list, scrollbar(h, len(items), start), m.width)...), "\n")
 }
 
 func wishLine(it account.WishItem, w int, homeName string) string {
@@ -479,19 +482,41 @@ func wishWhere(it account.WishItem) string {
 
 // --- shared row formatting --------------------------------------------------
 
+const bookAuthorW, bookKindW, bookRatingW, bookStatusW = 22, 13, 11, 26
+
+// bookCols sizes bookLine's columns: the title's width, and whether there's
+// room for the author.
+func bookCols(w int, kind string) (titleW int, showAuthor bool) {
+	showAuthor = w >= 90
+	fixed := bookRatingW + bookStatusW + 2
+	if kind != "" {
+		fixed += bookKindW + 1
+	}
+	if showAuthor {
+		fixed += bookAuthorW + 1
+	}
+	return max(12, w-fixed), showAuthor
+}
+
+// bookHeader labels bookLine's columns; kind labels the kind column, if
+// there is one (" " for one without a label).
+func bookHeader(w int, kind string) string {
+	titleW, showAuthor := bookCols(w, kind)
+	cols := []string{colHead("TITLE", titleW)}
+	if showAuthor {
+		cols = append(cols, colHead("AUTHOR", bookAuthorW))
+	}
+	if kind != "" {
+		cols = append(cols, colHead(kind, bookKindW))
+	}
+	return strings.Join(append(cols, colHead("RATING", bookRatingW), colHead("AVAILABLE", bookStatusW)), " ")
+}
+
 // bookLine renders title, author, a kind label, the rating and a status,
 // fitted to width w.
 func bookLine(b bc.Bib, w int, kind, status string) string {
-	const authorW, kindW, ratingW, statusW = 22, 13, 11, 26
-	showAuthor := w >= 90
-	fixed := ratingW + statusW + 2
-	if kind != "" {
-		fixed += kindW + 1
-	}
-	if showAuthor {
-		fixed += authorW + 1
-	}
-	titleW := max(12, w-fixed)
+	const authorW, kindW, ratingW, statusW = bookAuthorW, bookKindW, bookRatingW, bookStatusW
+	titleW, showAuthor := bookCols(w, kind)
 	title := b.Title
 	if b.Subtitle != "" {
 		title += ": " + b.Subtitle

@@ -1,9 +1,10 @@
 # Built-in shelfcheck themes, in athanor's palette.toml format: one table
 # per theme. bg/fg color the whole screen; dim is secondary text; active is
-# the cursor, tabs and headings; bar/barfg/bar_warn are the footer (and
-# errors on it); sigil is the app name; ansi is the 16-color palette (red,
-# green and yellow mark errors, "on shelf", stars and due dates). border,
-# wall_desk and wall_lock are accepted for compatibility and unused.
+# the cursor, tabs and headings; border draws rules and boxes and tints the
+# cursor's row; bar/barfg/bar_warn are the footer (and errors on it); sigil
+# is the app name; ansi is the 16-color palette (red, green and yellow mark
+# errors, "on shelf", stars and due dates). wall_desk and wall_lock are
+# accepted for compatibility and unused.
 #
 # Umber, Vellum, Orpiment and Cinnabar are from athanor
 # (https://github.com/script-wizards/athanor), used under its MIT license:

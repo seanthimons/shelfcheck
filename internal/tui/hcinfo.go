@@ -139,7 +139,7 @@ func (m Model) renderHardcover(w int, desc bool) []string {
 	}
 	wrap := lipgloss.NewStyle().Width(w)
 	in := h.info
-	out := []string{"", headingStyle.Render("ON HARDCOVER")}
+	out := []string{"", sectionHead("ON HARDCOVER", "", w)}
 	var facts []string
 	if in.HasRating() {
 		facts = append(facts, starStyle.Render(stars(in.Rating))+fmt.Sprintf(" %.1f", in.Rating)+

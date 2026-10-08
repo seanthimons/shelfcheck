@@ -86,6 +86,8 @@ type Model struct {
 	hcInfo map[string]*hcInfo
 	hcLib  map[int]hardcover.UserBook
 
+	covers map[string]*cover // jackets by URL; see cover.go
+
 	// Account and wishlist screens; see account.go. acct is nil when the
 	// patron's files aren't available (e.g. over SSH).
 	acct        *account.Store
@@ -124,6 +126,8 @@ type Model struct {
 	themeIdx  int
 	saveTheme func(name string) error
 	flash     string // a one-off footer message, cleared by the next key
+
+	showHelp bool // the box of every key (?), closed by the next key
 
 	vp   viewport.Model
 	spin spinner.Model
@@ -181,6 +185,7 @@ func New(client *bc.Client, home string, homeOnly bool, query string, acct *acco
 		details:      map[string]*bc.Details{},
 		detailsErr:   map[string]error{},
 		hcInfo:       map[string]*hcInfo{},
+		covers:       map[string]*cover{},
 		vp:           viewport.New(),
 		spin:         spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(accentStyle)),
 	}
@@ -248,8 +253,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.input.SetWidth(max(10, min(60, m.width-8)))
-		m.vp.SetWidth(m.width)
+		m.input.SetWidth(max(10, min(60, m.width-10)))
+		m.vp.SetWidth(max(1, m.width-2)) // leaves room for the scrollbar
 		m.vp.SetHeight(m.bodyHeight())
 		m.clampScroll()
 		if m.screen == detailScreen {
@@ -338,6 +343,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hcInfoMsg:
 		return m.handleHCInfo(msg)
 
+	case coverMsg:
+		return m.handleCover(msg)
+
 	case hcCollectionMsg, hcCheckedMsg, hcShelvedMsg:
 		return m.handleHardcoverMsg(msg)
 
@@ -346,6 +354,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.flash = ""
+		if m.showHelp {
+			m.showHelp = false
+			return m, nil
+		}
+		if msg.String() == "?" && m.screen != searchScreen {
+			m.showHelp = true
+			return m, nil
+		}
 		if mm, cmd, ok := m.navKey(msg.String()); ok {
 			return mm, cmd
 		}

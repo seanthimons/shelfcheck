@@ -19,12 +19,22 @@ func ApplyTheme(t theme.Theme) {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(ansiIndex))
 	}
 	accentStyle = color(t.Active, "6")
+	accentColor = lipgloss.Color(firstOf(t.Active, "6"))
 	titleStyle = lipgloss.NewStyle().Bold(true)
 	headingStyle = accentStyle.Bold(true)
 	tabOnStyle = accentStyle.Bold(true).Underline(true)
 	dimStyle = lipgloss.NewStyle().Faint(true)
 	if t.Dim != "" {
 		dimStyle = color(t.Dim, "")
+	}
+	// border draws rules and boxes, and tints the cursor's row. The
+	// terminal theme can't know what would show against its background, so
+	// it uses faint rules, plain boxes and an arrow alone.
+	ruleStyle, borderColor, selBG = lipgloss.NewStyle().Faint(true), nil, nil
+	if t.Border != "" {
+		ruleStyle = color(t.Border, "")
+		borderColor = lipgloss.Color(t.Border)
+		selBG = borderColor
 	}
 	okStyle = color(t.Color(2), "2")
 	warnStyle = color(t.Color(3), "3")
@@ -38,6 +48,8 @@ func ApplyTheme(t theme.Theme) {
 
 	barStyle = lipgloss.NewStyle().Faint(true)
 	barWarnStyle = errStyle
+	barBG = nil
+	footKeyStyle, footDescStyle = lipgloss.NewStyle().Bold(true), lipgloss.NewStyle().Faint(true)
 	if t.Bar != "" || t.BarFG != "" {
 		bar := lipgloss.NewStyle()
 		if t.Bar != "" {
@@ -48,6 +60,17 @@ func ApplyTheme(t theme.Theme) {
 			barStyle = bar.Foreground(lipgloss.Color(t.BarFG))
 		}
 		barWarnStyle = bar.Foreground(lipgloss.Color(firstOf(t.BarWarn, t.Color(9), t.Color(1), t.BarFG)))
+		if t.Bar != "" {
+			barBG = lipgloss.Color(t.Bar)
+		}
+		footDescStyle = lipgloss.NewStyle()
+		if t.BarFG != "" {
+			footDescStyle = footDescStyle.Foreground(lipgloss.Color(t.BarFG))
+		}
+		footKeyStyle = footDescStyle.Bold(true)
+		if t.Active != "" {
+			footKeyStyle = footKeyStyle.Foreground(lipgloss.Color(t.Active))
+		}
 	}
 }
 

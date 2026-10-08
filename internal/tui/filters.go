@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	bc "shelfcheck/internal/bibliocommons"
 )
@@ -250,9 +251,9 @@ func (m Model) updatePanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.valCursor = min(len(opts)-1, m.valCursor+1)
 	case "pgup":
-		m.valCursor = max(0, m.valCursor-m.listHeight())
+		m.valCursor = max(0, m.valCursor-m.panelListHeight())
 	case "pgdown":
-		m.valCursor = min(len(opts)-1, m.valCursor+m.listHeight())
+		m.valCursor = min(len(opts)-1, m.valCursor+m.panelListHeight())
 	case "enter", "space":
 		if len(opts) == 0 {
 			return m, nil
@@ -309,25 +310,32 @@ func (m Model) cycleSort() (tea.Model, tea.Cmd) {
 
 // --- view -------------------------------------------------------------------
 
+// The panel is a box over the faded results, panelW wide inside its
+// border, with two lines of heading over its list.
+func (m Model) panelW() int          { return max(30, min(72, m.width-8)) }
+func (m Model) panelListHeight() int { return max(1, m.bodyHeight()-6) }
+
 func (m Model) viewPanel() string {
 	cats := m.visibleCategories()
 	cat := cats[min(m.catCursor, len(cats)-1)]
+	w := m.panelW()
 	nameW := 16
 
 	if m.panel == panelCategories {
-		rows := []string{"  Filter " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text)), ""}
+		rows := []string{ansi.Truncate("Filter "+titleStyle.Render(fmt.Sprintf("%q", m.q.Text)), w, "…"), ""}
 		for i, c := range cats {
-			line := pad(c.name, nameW) + " " + accentStyle.Render(pad(m.summary(m.draft, c), max(10, m.width-nameW-8)))
+			line := pad(c.name, nameW) + " " + accentStyle.Render(pad(m.summary(m.draft, c), max(10, w-nameW-3)))
 			rows = append(rows, cursorRow(i == m.catCursor, line))
 		}
-		return strings.Join(rows, "\n")
+		return box(strings.Join(rows, "\n"), accentColor)
 	}
 
-	rows := []string{"  " + titleStyle.Render(cat.name) + dimStyle.Render(fmt.Sprintf(" · filtering %q", m.q.Text)), ""}
+	rows := []string{ansi.Truncate(titleStyle.Render(cat.name)+dimStyle.Render(fmt.Sprintf(" · filtering %q", m.q.Text)), w, "…"), ""}
 	opts := m.options(cat)
-	h := m.listHeight()
+	h := min(len(opts), m.panelListHeight())
 	start := max(0, min(m.valCursor-h+1, len(opts)-h))
-	labelW := max(10, min(60, m.width-16))
+	labelW := max(10, w-2-4-8-2)
+	var list []string
 	for i := start; i < min(len(opts), start+h); i++ {
 		o := opts[i]
 		selected := m.draft.Has(cat.field, o.value)
@@ -348,17 +356,11 @@ func (m Model) viewPanel() string {
 			count = fmt.Sprint(o.count)
 		}
 		line := pad(m.valueLabel(cat.field, o.value), labelW) + " " + fmt.Sprintf("%7s", count)
-		rows = append(rows, cursorRow(i == m.valCursor, mark+line))
+		list = append(list, cursorRow(i == m.valCursor, mark+line))
 	}
+	rows = append(rows, withScrollbar(list, scrollbar(h, len(opts), start), w)...)
 	if len(opts) == 0 {
-		rows = append(rows, dimStyle.Render("  Nothing to filter by in these results."))
+		rows = append(rows, dimStyle.Render("Nothing to filter by in these results."))
 	}
-	return strings.Join(rows, "\n")
-}
-
-func cursorRow(selected bool, line string) string {
-	if selected {
-		return accentStyle.Render("▸ ") + line
-	}
-	return "  " + line
+	return box(strings.Join(rows, "\n"), accentColor)
 }

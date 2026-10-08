@@ -198,13 +198,13 @@ func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) viewForYou() string {
 	switch {
 	case m.acct == nil || !m.hasRecord():
-		return "\n  " + titleStyle.Render("Recommendations need your reading history.") +
-			"\n\n  Set up your library login (shelfcheck login), Libby (shelfcheck libby link <code>)\n  and/or Hardcover (HARDCOVER_TOKEN)."
+		return m.notice(titleStyle.Render("Recommendations need your reading history.") +
+			"\n\nSet up your library login (shelfcheck login), Libby (shelfcheck libby link <code>)\nand/or Hardcover (HARDCOVER_TOKEN).")
 	case m.recErr != nil && len(m.recPicks) == 0:
-		return "\n  " + errStyle.Render("Couldn't build recommendations: "+m.recErr.Error()) + "\n\n  Press r to try again."
+		return m.notice(errStyle.Render("Couldn't build recommendations: "+m.recErr.Error()) + "\n\nPress r to try again.")
 	case len(m.recPicks) == 0:
-		return "\n  " + m.spin.View() + " " + capitalize(m.recStage) + "…" +
-			dimStyle.Render("\n\n  This takes about half a minute the first time.")
+		return m.notice(m.spin.View() + " " + capitalize(m.recStage) + "…" +
+			"\n\n" + dimStyle.Render("This takes about half a minute the first time."))
 	}
 
 	head := "  " + titleStyle.Render("For you") + dimStyle.Render(" · on the shelf at "+m.homeName+", or ebooks to borrow now")
@@ -228,7 +228,7 @@ func (m Model) viewForYou() string {
 			if len(us) == 0 {
 				return
 			}
-			lines = append(lines, "", "  "+headingStyle.Render(title))
+			lines = append(lines, "", "  "+sectionHead(title, "", w))
 			for _, u := range us {
 				if i == m.recCursor {
 					cursorLine = len(lines)
@@ -256,7 +256,7 @@ func (m Model) viewForYou() string {
 			})
 	}
 	if len(m.recProfile.UpNext) > 0 && !m.recLoading {
-		lines = append(lines, "", "  "+headingStyle.Render("UP NEXT IN YOUR SERIES, NOT AVAILABLE NOW"))
+		lines = append(lines, "", "  "+sectionHead("UP NEXT IN YOUR SERIES, NOT AVAILABLE NOW", "", w))
 		for _, u := range m.recProfile.UpNext {
 			lines = append(lines, "    "+fmt.Sprintf("%s #%v: ", u.Series, u.Position)+titleStyle.Render(u.Title)+dimStyle.Render(" · search it to place a hold"))
 		}
@@ -267,7 +267,7 @@ func (m Model) viewForYou() string {
 
 	h := m.bodyHeight() - 2
 	start := max(0, min(cursorLine-h/3, len(lines)-h))
-	return head + "\n\n" + strings.Join(lines[start:], "\n")
+	return head + "\n\n" + strings.Join(withScrollbar(lines[start:], scrollbar(h, len(lines), start), m.width), "\n")
 }
 
 func pickWhere(p recommend.Pick) string {

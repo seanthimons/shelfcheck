@@ -275,9 +275,9 @@ func (m Model) toggleWant(b hardcover.PromptAnswer) (tea.Model, tea.Cmd) {
 func (m Model) viewHardcover() string {
 	switch {
 	case m.hc.err != nil && m.hc.col == nil:
-		return "\n  " + errStyle.Render("Couldn't load from Hardcover: "+m.hc.err.Error()) + "\n\n  Press r to try again."
+		return m.notice(errStyle.Render("Couldn't load from Hardcover: "+m.hc.err.Error()) + "\n\nPress r to try again.")
 	case m.hc.col == nil:
-		return "\n  " + m.spin.View() + " Loading from Hardcover…"
+		return m.notice(m.spin.View() + " Loading from Hardcover…")
 	}
 	col := m.hc.col
 	avail := 0
@@ -304,9 +304,9 @@ func (m Model) viewHardcover() string {
 	if m.hc.note != "" {
 		sub = "  " + m.hc.note
 	}
-	rows := []string{head, sub}
 	vis := m.hcVisible()
 	if len(vis) == 0 {
+		rows := []string{head, sub}
 		if !m.hc.loading {
 			rows = append(rows, "", dimStyle.Render("  None of these are available right now. A shows them all."))
 		}
@@ -314,11 +314,13 @@ func (m Model) viewHardcover() string {
 	}
 	h := m.listHeight()
 	start := max(0, min(m.hc.cursor-h+1, len(vis)-h))
+	head = spread(head, dimStyle.Render(fmt.Sprintf("%d/%d", m.hc.cursor+1, len(vis))), m.width-2)
+	rows := []string{head, sub, "  " + bookHeader(w, " ")}
+	var list []string
 	for i := start; i < min(len(vis), start+h); i++ {
-		j := vis[i]
-		rows = append(rows, cursorRow(i == m.hc.cursor, m.hcLine(j, w)))
+		list = append(list, cursorRow(i == m.hc.cursor, m.hcLine(vis[i], w)))
 	}
-	return strings.Join(rows, "\n")
+	return strings.Join(append(rows, withScrollbar(list, scrollbar(h, len(vis), start), m.width)...), "\n")
 }
 
 // hcLine is a wishlist-style row, labeled with the patron's own Hardcover

@@ -2,6 +2,8 @@ package tui
 
 import (
 	"errors"
+	"image"
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -106,3 +108,76 @@ func TestFooterSpansWidthInEveryTheme(t *testing.T) {
 		}
 	}
 }
+
+func TestScrollbar(t *testing.T) {
+	if scrollbar(10, 10, 0) != nil {
+		t.Error("scrollbar shown when everything fits")
+	}
+	thumb := func(bar []string) (first, n int) {
+		first = -1
+		for i, c := range bar {
+			if ansi.Strip(c) == "┃" {
+				if first < 0 {
+					first = i
+				}
+				n++
+			}
+		}
+		return first, n
+	}
+	if first, n := thumb(scrollbar(10, 100, 0)); first != 0 || n != 1 {
+		t.Errorf("at the top: thumb at %d, %d tall", first, n)
+	}
+	if first, n := thumb(scrollbar(10, 100, 90)); first != 9 || n != 1 {
+		t.Errorf("at the bottom: thumb at %d, %d tall", first, n)
+	}
+	if first, n := thumb(scrollbar(10, 20, 5)); first != 2 || n != 5 {
+		t.Errorf("halfway: thumb at %d, %d tall", first, n)
+	}
+	for _, l := range withScrollbar([]string{"short"}, scrollbar(4, 8, 0), 20) {
+		if w := ansi.StringWidth(l); w != 20 {
+			t.Errorf("scrollbar row is %d wide, want 20", w)
+		}
+	}
+}
+
+func TestHalfBlocks(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 40, 60))
+	for y := range 60 {
+		for x := range 40 {
+			c := color.RGBA{200, 60, 40, 255}
+			if y >= 30 {
+				c = color.RGBA{30, 90, 160, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	lines := halfBlocks(img, 16)
+	if len(lines) != 12 {
+		t.Fatalf("got %d lines, want 12 (a 2:3 jacket, 16 wide)", len(lines))
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != 16 {
+			t.Errorf("line %d is %d wide, want 16", i, w)
+		}
+	}
+	if !strings.Contains(lines[0], "38;2;200;60;40;48;2;200;60;40m") || !strings.Contains(lines[11], "38;2;30;90;160") {
+		t.Errorf("colors out of place: %q … %q", lines[0], lines[11])
+	}
+
+	gray := image.NewUniform(color.RGBA{203, 203, 203, 255})
+	if l := halfBlocks(image.NewRGBA(image.Rect(0, 0, 4, 4)), 16); l != nil {
+		t.Error("drew a tiny image")
+	}
+	if l := halfBlocks(&boundedImage{gray, image.Rect(0, 0, 200, 200)}, 16); l != nil {
+		t.Error("drew the catalog's flat gray stand-in for a missing jacket")
+	}
+}
+
+// boundedImage gives a uniform color a size.
+type boundedImage struct {
+	image.Image
+	r image.Rectangle
+}
+
+func (b *boundedImage) Bounds() image.Rectangle { return b.r }

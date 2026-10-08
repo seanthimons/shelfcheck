@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"os"
 	"regexp"
@@ -22,13 +23,19 @@ import (
 var (
 	accentStyle, titleStyle, headingStyle, dimStyle, okStyle, warnStyle,
 	errStyle, starStyle, selStyle, tabOnStyle, barStyle, barWarnStyle,
-	sigilStyle lipgloss.Style
+	sigilStyle, ruleStyle, footKeyStyle, footDescStyle lipgloss.Style
+
+	// Colors for borders, the cursor row's tint and the footer bar; nil
+	// when the theme leaves them to the terminal.
+	accentColor, borderColor, selBG, barBG color.Color
 )
 
 func init() { ApplyTheme(theme.Theme{Name: theme.Terminal}) }
 
-func (m Model) bodyHeight() int { return max(1, m.height-2) }
-func (m Model) listHeight() int { return max(1, m.bodyHeight()-2) }
+// The body is what's between the header (a line and its rule) and the
+// footer; lists in it have two lines of heading and a row of column labels.
+func (m Model) bodyHeight() int { return max(1, m.height-3) }
+func (m Model) listHeight() int { return max(1, m.bodyHeight()-3) }
 
 func (m Model) View() tea.View {
 	var body string
@@ -38,7 +45,7 @@ func (m Model) View() tea.View {
 	case resultsScreen:
 		body = m.viewResults()
 	case detailScreen:
-		body = m.vp.View()
+		body = m.viewDetail()
 	case accountScreen:
 		body = m.viewAccount()
 	case wishlistScreen:
@@ -49,6 +56,9 @@ func (m Model) View() tea.View {
 		body = m.viewHardcover()
 	}
 	body = lipgloss.NewStyle().Height(m.bodyHeight()).MaxHeight(m.bodyHeight()).Render(body)
+	if m.showHelp {
+		body = m.overlay(body, m.viewHelp())
+	}
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, m.viewHeader(), body, m.viewFooter()))
 	v.AltScreen = true
 	v.WindowTitle = "shelfcheck"
@@ -59,16 +69,6 @@ func (m Model) View() tea.View {
 		v.ForegroundColor = lipgloss.Color(t.FG)
 	}
 	return v
-}
-
-func (m Model) viewHeader() string {
-	left := sigilStyle.Render("shelfcheck") + dimStyle.Render(" "+buildStamp+" · "+m.client.Library)
-	right := dimStyle.Render("home: ") + m.homeName
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		return left
-	}
-	return left + strings.Repeat(" ", gap) + right
 }
 
 // buildStamp names the running build, so a stale copy is easy to spot: the
@@ -106,63 +106,6 @@ var buildStamp = func() string {
 	return rev
 }()
 
-func (m Model) viewFooter() string {
-	var keys string
-	switch m.screen {
-	case searchScreen:
-		keys = "enter search (or paste a Hardcover prompt/list link) · tab type · alt+p for you · alt+w wishlist · alt+m account · alt+t theme"
-		if len(m.results) > 0 {
-			keys += " · esc back to results"
-		} else {
-			keys += " · esc quit"
-		}
-	case resultsScreen:
-		switch {
-		case m.panel == panelCategories:
-			keys = "↑↓ move · enter choose · x clear one · c clear all · esc apply"
-		case m.panel == panelValues:
-			keys = "↑↓ move · space/enter toggle · esc back"
-		default:
-			keys = "enter open · f filters · a home only · o sort · / search · p for you · w wishlist · m account · q quit"
-			if m.q.Narrowed() || m.q.Sort != "" {
-				keys = "enter open · f filters · F clear · a home only · o sort · / search · p for you · w wishlist · m account · q quit"
-			}
-		}
-	case detailScreen:
-		keys = "↑↓ scroll · r refresh · c search catalog · esc back · / search · p for you · w wishlist · m account · q quit"
-		if m.selected.ID == "" {
-			keys = "↑↓ scroll · c search catalog · esc back · / search · p for you · w wishlist · m account · q quit"
-		}
-	case accountScreen:
-		keys = "↑↓ move · enter open · r refresh · p for you · w wishlist · / search · q quit"
-	case forYouScreen:
-		keys = "↑↓ move · enter open · h open its Hardcover source · r refresh · w wishlist · m account · / search · q quit"
-	case hardcoverScreen:
-		keys = "↑↓ move · enter open · + want to read · A show all · r recheck · esc back · p for you · w wishlist · / search · q quit"
-	case wishlistScreen:
-		keys = "↑↓ move · enter open · A show all · r recheck · p for you · m account · / search · q quit"
-	}
-	// The bar is plain text in bar styles, padded to the full width, so a
-	// theme's bar color runs edge to edge.
-	lead, leadStyle := "", barStyle
-	switch {
-	case m.err != nil:
-		lead, leadStyle = "error: "+m.err.Error()+"  ", barWarnStyle
-	case m.flash != "":
-		lead = m.flash + "  "
-	case m.loadingMore:
-		lead = ansi.Strip(m.spin.View()) + " loading more…  "
-	}
-	w := max(1, m.width)
-	lead = ansi.Truncate(lead, w, "…")
-	rest := max(0, w-ansi.StringWidth(lead))
-	bar := barStyle.Width(rest).Render(ansi.Truncate(keys, rest, "…"))
-	if lead == "" {
-		return bar
-	}
-	return leadStyle.Render(lead) + bar
-}
-
 // --- search -----------------------------------------------------------------
 
 func (m Model) viewSearch() string {
@@ -175,30 +118,42 @@ func (m Model) viewSearch() string {
 			tabs = append(tabs, dimStyle.Render(label))
 		}
 	}
-	lines := []string{
-		"",
-		"  " + titleStyle.Render("Search the catalog"),
-		"",
-		"  " + strings.Join(tabs, "   "),
-		"",
-		"  " + m.input.View(),
-		"",
+	w := min(m.width-4, 66)
+	input := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).Width(w)
+	if accentColor != nil {
+		input = input.BorderForeground(accentColor)
 	}
+	status := dimStyle.Render("or paste a Hardcover prompt or list link")
 	if m.searching {
-		lines = append(lines, "  "+m.spin.View()+" Searching…")
+		status = m.spin.View() + " Searching…"
 	}
-	return strings.Join(lines, "\n")
+	block := lipgloss.JoinVertical(lipgloss.Center,
+		titleStyle.Render("Search the catalog")+dimStyle.Render(" · "+m.homeName),
+		"",
+		strings.Join(tabs, "   "),
+		input.Render(m.input.View()),
+		status,
+	)
+	// A little above center reads as centered.
+	h := m.bodyHeight()
+	top := max(0, (h-lipgloss.Height(block))*2/5)
+	return strings.Repeat("\n", top) + lipgloss.PlaceHorizontal(m.width, lipgloss.Center, block)
 }
 
 // --- results ----------------------------------------------------------------
 
 func (m Model) viewResults() string {
 	if m.searching {
-		return "\n  " + m.spin.View() + " Searching…"
+		return m.notice(m.spin.View() + " Searching…")
 	}
+	list := m.viewResultList()
 	if m.panel != panelClosed {
-		return m.viewPanel()
+		return m.overlay(list, m.viewPanel())
 	}
+	return list
+}
+
+func (m Model) viewResultList() string {
 	head := fmt.Sprintf("%s for %s", plural(m.total, "result"), titleStyle.Render(fmt.Sprintf("%q", m.q.Text)))
 	if m.q.Type != "" && m.q.Type != bc.Keyword {
 		head += dimStyle.Render(" (" + string(m.q.Type) + ")")
@@ -208,29 +163,44 @@ func (m Model) viewResults() string {
 	}
 	filters := m.filterSummary(m.q)
 	if len(m.results) == 0 {
-		msg := "\n  No results for " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text))
+		msg := "No results for " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text))
 		if m.q.Has(bc.FacetStatus, m.home) {
-			return msg + " on the shelf at " + m.homeName + ".\n  Press a to look at every branch."
+			return m.notice(msg + " on the shelf at " + m.homeName + ".\nPress a to look at every branch.")
 		}
 		if filters != "" {
-			return msg + " with " + accentStyle.Render(filters) + ".\n  Press f to change filters or F to clear them."
+			return m.notice(msg + " with " + accentStyle.Render(filters) + ".\nPress f to change filters or F to clear them.")
 		}
-		return msg + ". Press / to search again."
+		return m.notice(msg + ". Press / to search again.")
 	}
+	count := m.total
+	if m.partial {
+		count = len(m.results)
+	}
+	head = spread("  "+head, dimStyle.Render(fmt.Sprintf("%d/%d", m.cursor+1, count)), m.width-2)
 
-	// Columns: marker, title, author, format, year, rating, availability, home.
+	// Columns: marker, title, author, format, year, rating, availability,
+	// home; the last two cells on the right are for the scrollbar.
 	const formatW, yearW, ratingW, availW, homeW = 12, 4, 11, 15, 6
 	authorW := 22
 	if m.width < 100 {
 		authorW = 0
 	}
-	fixed := 2 + formatW + yearW + ratingW + availW + homeW + 6
+	fixed := 2 + formatW + yearW + ratingW + availW + homeW + 6 + 2
 	if authorW > 0 {
 		fixed += authorW + 1
 	}
 	titleW := max(12, m.width-fixed)
 
-	rows := []string{"  " + head, "  " + accentStyle.Render(ansi.Truncate(filters, max(1, m.width-4), "…"))}
+	labels := []string{colHead("TITLE", titleW)}
+	if authorW > 0 {
+		labels = append(labels, colHead("AUTHOR", authorW))
+	}
+	labels = append(labels, colHead("FORMAT", formatW), colHead("YEAR", yearW), colHead("RATING", ratingW),
+		colHead("AVAILABLE", availW), colHead("HOME", homeW))
+
+	rows := []string{head, "  " + accentStyle.Render(ansi.Truncate(filters, max(1, m.width-4), "…")),
+		"  " + strings.Join(labels, " ")}
+	var list []string
 	end := min(len(m.results), m.offset+m.listHeight())
 	for i := m.offset; i < end; i++ {
 		b := m.results[i]
@@ -250,13 +220,17 @@ func (m Model) viewResults() string {
 			pad(m.homeMarker(b), homeW),
 		)
 		line := strings.Join(cols, " ")
-		if i == m.cursor {
-			rows = append(rows, accentStyle.Render("▸ ")+selStyle.Render(ansi.Strip(line)))
-		} else {
-			rows = append(rows, "  "+m.styleRow(b, line))
+		switch {
+		case i == m.cursor && selBG == nil:
+			list = append(list, accentStyle.Render("▸ ")+selStyle.Render(ansi.Strip(line)))
+		case i == m.cursor:
+			list = append(list, cursorRow(true, line))
+		default:
+			list = append(list, "  "+m.styleRow(b, line))
 		}
 	}
-	return strings.Join(rows, "\n")
+	list = withScrollbar(list, scrollbar(m.listHeight(), count, m.offset), m.width)
+	return strings.Join(append(rows, list...), "\n")
 }
 
 func (m Model) styleRow(b bc.Bib, line string) string {
@@ -287,9 +261,31 @@ func (m Model) homeMarker(b bc.Bib) string {
 
 // --- detail -----------------------------------------------------------------
 
+// viewDetail is the scrolling detail page, with a scrollbar when it's
+// longer than the screen.
+func (m Model) viewDetail() string {
+	bar := scrollbar(m.vp.Height(), m.vp.TotalLineCount(), m.vp.YOffset())
+	if bar == nil {
+		return m.vp.View()
+	}
+	return strings.Join(withScrollbar(strings.Split(m.vp.View(), "\n"), bar, m.width), "\n")
+}
+
+// The detail page puts availability in a box beside the rest when there's
+// room for both, and above it when there isn't.
+const (
+	sideW     = 50  // the availability box
+	sideAtMin = 130 // the narrowest screen with room for it
+)
+
 func (m Model) renderDetail() string {
 	b := m.selected
-	w := max(20, min(m.width-4, 100))
+	total := max(20, m.width-6) // less the indent and the scrollbar
+	side := m.width >= sideAtMin && b.ID != ""
+	w := min(total, 100)
+	if side {
+		w = min(total-sideW-3, 100)
+	}
 	wrap := lipgloss.NewStyle().Width(w)
 	var out []string
 	add := func(lines ...string) { out = append(out, lines...) }
@@ -307,11 +303,18 @@ func (m Model) renderDetail() string {
 		return indent(strings.Join(out, "\n"), 2)
 	}
 
+	// The title block sits beside the jacket, if there is one.
+	jacket := m.coverLines()
+	head := wrap
+	if jacket != nil {
+		head = lipgloss.NewStyle().Width(max(10, w-coverW-2))
+	}
+	var top []string
 	title := b.Title
 	if b.Subtitle != "" {
 		title += ": " + b.Subtitle
 	}
-	add("", wrap.Render(titleStyle.Render(title)))
+	top = append(top, head.Render(titleStyle.Render(title)))
 	meta := []string{}
 	if len(b.Authors) > 0 {
 		meta = append(meta, strings.Join(b.Authors, "; "))
@@ -323,20 +326,28 @@ func (m Model) renderDetail() string {
 	if b.Edition != "" {
 		meta = append(meta, b.Edition)
 	}
-	add(wrap.Render(strings.Join(meta, " · ")))
+	top = append(top, head.Render(strings.Join(meta, " · ")))
 	if b.Rating.Count > 0 {
-		add(starStyle.Render(stars(b.Rating.Stars())) + fmt.Sprintf(" %.1f", b.Rating.Stars()) +
+		top = append(top, starStyle.Render(stars(b.Rating.Stars()))+fmt.Sprintf(" %.1f", b.Rating.Stars())+
 			dimStyle.Render(fmt.Sprintf(" (%s)", plural(b.Rating.Count, "rating"))))
 	}
 	if len(b.Series) > 0 {
-		add(dimStyle.Render("Series: ") + strings.Join(b.Series, "; "))
+		top = append(top, head.Render(dimStyle.Render("Series: ")+strings.Join(b.Series, "; ")))
+	}
+	add("")
+	if jacket != nil {
+		add(lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(jacket, "\n"), "  ", strings.Join(top, "\n")))
+	} else {
+		add(top...)
 	}
 
-	add("")
-	add(m.renderAvailability(w)...)
+	if !side {
+		add("")
+		add(m.renderAvailability(w, false)...)
+	}
 
 	if b.Description != "" || len(b.Genres) > 0 {
-		add("", headingStyle.Render("ABOUT"))
+		add("", sectionHead("ABOUT", "", w))
 		if b.Description != "" {
 			add(wrap.Render(b.Description))
 		}
@@ -359,38 +370,50 @@ func (m Model) renderDetail() string {
 		add("", dimStyle.Render(m.spin.View()+" loading reviews…"))
 	default:
 		for _, r := range d.Reviews {
-			add("", headingStyle.Render("REVIEW")+dimStyle.Render(" · "+r.Source), wrap.Render(r.Text))
+			add("", sectionHead("REVIEW", dimStyle.Render(" · "+r.Source), w), wrap.Render(r.Text))
 		}
 		if d.AuthorNote != "" {
-			add("", headingStyle.Render("ABOUT THE AUTHOR"), wrap.Render(d.AuthorNote))
+			add("", sectionHead("ABOUT THE AUTHOR", "", w), wrap.Render(d.AuthorNote))
 		}
 		if d.Excerpt != "" {
-			add("", headingStyle.Render("EXCERPT"), wrap.Render(d.Excerpt))
+			add("", sectionHead("EXCERPT", "", w), wrap.Render(d.Excerpt))
 		}
 	}
 	add("")
-	return indent(strings.Join(out, "\n"), 2)
+	page := strings.Join(out, "\n")
+	if side {
+		avail := box(strings.Join(m.renderAvailability(sideW-4, true), "\n"), borderColor)
+		page = lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(w).Render(page), "   ", "\n"+avail)
+	}
+	return indent(page, 2)
 }
 
-func (m Model) renderAvailability(w int) []string {
+// renderAvailability lists where the selected title's copies are, w wide.
+// boxed puts the summary under the heading, for the narrow box beside the
+// description.
+func (m Model) renderAvailability(w int, boxed bool) []string {
 	b := m.selected
 	a := m.avail[b.ID]
 	if a == nil {
 		if err := m.availErr[b.ID]; err != nil {
-			return []string{headingStyle.Render("AVAILABILITY"), errStyle.Render("Couldn't load: " + err.Error())}
+			return []string{sectionHead("AVAILABILITY", "", w), errStyle.Render("Couldn't load: " + err.Error())}
 		}
-		return []string{headingStyle.Render("AVAILABILITY"), dimStyle.Render(m.spin.View() + " checking shelves…")}
+		return []string{sectionHead("AVAILABILITY", "", w), dimStyle.Render(m.spin.View() + " checking shelves…")}
 	}
 	s := a.Summary
-	head := headingStyle.Render("AVAILABILITY") + "  " + availLong(s)
+	summary := availLong(s)
 	if m.availPending[b.ID] {
-		head += " " + m.spin.View()
+		summary += " " + m.spin.View()
 	}
-	out := []string{head}
+	out := []string{sectionHead("AVAILABILITY", "  "+summary, w)}
+	if boxed {
+		out = []string{headingStyle.Render("AVAILABILITY"), lipgloss.NewStyle().Width(w).Render(summary)}
+	}
 
 	if b.Digital || len(a.Copies) == 0 {
 		if len(a.DigitalFormats) > 0 {
-			out = append(out, dimStyle.Render("Formats: ")+strings.Join(mapStrings(a.DigitalFormats, digitalLabel), ", "))
+			out = append(out, lipgloss.NewStyle().Width(w).Render(dimStyle.Render("Formats: ")+strings.Join(mapStrings(a.DigitalFormats, digitalLabel), ", ")))
 		}
 		if b.Digital {
 			out = append(out, dimStyle.Render("Borrow through Libby / OverDrive."))
@@ -433,7 +456,7 @@ func (m Model) renderAvailability(w int) []string {
 		if !nextDue.IsZero() {
 			line += " · next due " + dueLabel(nextDue)
 		}
-		out = append(out, "", dimStyle.Render(line))
+		out = append(out, "", lipgloss.NewStyle().Width(w).Render(dimStyle.Render(line)))
 	}
 	return out
 }
@@ -455,6 +478,11 @@ func copyLine(c bc.Copy, showBranch bool, w int) string {
 	call := c.CallNumber
 	if c.Volume != "" {
 		call += " " + c.Volume
+	}
+	if w < 64 {
+		// Too narrow for columns: the call number and status go underneath.
+		return "  " + icon + " " + ansi.Truncate(where, w-4, "…") + "\n" +
+			"    " + pad(call, max(4, w-5-ansi.StringWidth(status))) + " " + status
 	}
 	whereW := max(10, w-4-16-14)
 	return "  " + icon + " " + pad(where, whereW) + " " + pad(call, 14) + " " + status
