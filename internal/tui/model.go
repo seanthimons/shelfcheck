@@ -30,6 +30,7 @@ const requestTimeout = 20 * time.Second
 type Model struct {
 	client   *bc.Client
 	home     string // home branch code
+	homeOnly bool   // new searches start filtered to copies on the shelf at home
 	homeName string
 	branches map[string]string // code -> name
 
@@ -96,7 +97,9 @@ type (
 )
 
 // New builds the model. If query is non-empty it is searched immediately.
-func New(client *bc.Client, home, query string) Model {
+// New builds the model. If homeOnly, searches start narrowed to titles on
+// the shelf at the home branch.
+func New(client *bc.Client, home string, homeOnly bool, query string) Model {
 	in := textinput.New()
 	in.Prompt = "› "
 	in.Placeholder = "title, author, subject…"
@@ -107,6 +110,7 @@ func New(client *bc.Client, home, query string) Model {
 	m := Model{
 		client:       client,
 		home:         home,
+		homeOnly:     homeOnly,
 		homeName:     "branch " + home,
 		branches:     map[string]string{},
 		input:        in,
@@ -121,7 +125,7 @@ func New(client *bc.Client, home, query string) Model {
 	if strings.TrimSpace(query) != "" {
 		m.searchSeq = 1
 		m.searching = true
-		m.q = bc.Query{Text: strings.TrimSpace(query)}
+		m.q = m.newQuery(strings.TrimSpace(query), bc.Keyword)
 	}
 	return m
 }
@@ -176,22 +180,6 @@ func (m Model) fetchLocations() tea.Cmd {
 	}
 }
 
-// prefetchVisible loads copy-level availability for the physical titles on
-// screen that have a copy on a shelf somewhere, so the list can show whether
-// one is at the home branch. Only visible rows are fetched to keep traffic low.
-func (m *Model) prefetchVisible() tea.Cmd {
-	var cmds []tea.Cmd
-	end := min(len(m.results), m.offset+m.listHeight())
-	for _, b := range m.results[min(m.offset, end):end] {
-		if b.Digital || b.Summary.Available == 0 || m.avail[b.ID] != nil || m.availPending[b.ID] || m.availErr[b.ID] != nil {
-			continue
-		}
-		m.availPending[b.ID] = true
-		cmds = append(cmds, m.fetchAvail(b.ID))
-	}
-	return tea.Batch(cmds...)
-}
-
 // --- update -----------------------------------------------------------------
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -205,7 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == detailScreen {
 			m.refreshDetail()
 		}
-		return m, m.prefetchVisible()
+		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -242,7 +230,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.total, m.page, m.pages = msg.res.Total, msg.res.Page, msg.res.Pages
 		m.partial = msg.res.Partial
-		return m, m.prefetchVisible()
+		return m, nil
 
 	case availMsg:
 		delete(m.availPending, msg.id)
@@ -300,7 +288,7 @@ func (m Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.searchSeq++
 		m.searching = true
 		m.err = nil
-		m.q = bc.Query{Text: q, Type: searchTypes[m.typeIdx]}
+		m.q = m.newQuery(q, searchTypes[m.typeIdx])
 		return m, m.doSearch(m.searchSeq, m.q, 1, false)
 	case "tab":
 		m.typeIdx = (m.typeIdx + 1) % len(searchTypes)
@@ -360,7 +348,7 @@ func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.clampScroll()
-	return m, tea.Batch(m.prefetchVisible(), m.maybeLoadMore())
+	return m, m.maybeLoadMore()
 }
 
 func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -384,6 +372,15 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd
+}
+
+// newQuery starts a fresh search, carrying over only the home-branch preference.
+func (m Model) newQuery(text string, typ bc.SearchType) bc.Query {
+	q := bc.Query{Text: text, Type: typ}
+	if m.homeOnly {
+		q.Toggle(bc.FacetStatus, m.home)
+	}
+	return q
 }
 
 func (m *Model) toSearch() tea.Cmd {

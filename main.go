@@ -19,10 +19,11 @@ import (
 func main() {
 	library := flag.String("library", "cincinnatilibrary", "BiblioCommons library (subdomain of its bibliocommons.com catalog)")
 	home := flag.String("home", "1", "home branch code, listed first (1 = Main Library)")
+	anywhere := flag.Bool("anywhere", false, "start searches across all branches instead of only what's on the shelf at -home")
 	flag.Parse()
 
 	client := bibliocommons.New(*library)
-	m := tui.New(client, *home, strings.Join(flag.Args(), " "))
+	m := tui.New(client, *home, !*anywhere, strings.Join(flag.Args(), " "))
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "shelfcheck:", err)
 		os.Exit(1)

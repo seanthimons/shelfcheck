@@ -277,6 +277,8 @@ func (m Model) runQuery(q bc.Query) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.q = q
+	// Whatever the home filter ends up as becomes the default for new searches.
+	m.homeOnly = q.Has(bc.FacetStatus, m.home)
 	m.searchSeq++
 	m.searching = true
 	m.loadingMore = false

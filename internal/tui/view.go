@@ -76,9 +76,9 @@ func (m Model) viewFooter() string {
 		case m.panel == panelValues:
 			keys = "↑↓ move · space/enter toggle · esc back"
 		default:
-			keys = "enter open · f filters · a on shelf at home · o sort · / search · q quit"
+			keys = "enter open · f filters · a home only · o sort · / search · q quit"
 			if m.q.Narrowed() || m.q.Sort != "" {
-				keys = "enter open · f filters · F clear · a at home · o sort · / search · q quit"
+				keys = "enter open · f filters · F clear · a home only · o sort · / search · q quit"
 			}
 		}
 	case detailScreen:
@@ -140,6 +140,9 @@ func (m Model) viewResults() string {
 	filters := m.filterSummary(m.q)
 	if len(m.results) == 0 {
 		msg := "\n  No results for " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text))
+		if m.q.Has(bc.FacetStatus, m.home) {
+			return msg + " on the shelf at " + m.homeName + ".\n  Press a to look at every branch."
+		}
 		if filters != "" {
 			return msg + " with " + accentStyle.Render(filters) + ".\n  Press f to change filters or F to clear them."
 		}
@@ -199,9 +202,8 @@ func (m Model) homeMarker(b bc.Bib) string {
 	if b.Digital || b.Summary.Available == 0 {
 		return ""
 	}
-	if m.availPending[b.ID] {
-		return dimStyle.Render("…")
-	}
+	// Only titles whose copies we've already looked up (by opening them) get
+	// a marker; checking every row would cost a request each.
 	a := m.avail[b.ID]
 	if a == nil {
 		return ""
