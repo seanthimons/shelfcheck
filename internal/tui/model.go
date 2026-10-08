@@ -11,7 +11,9 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
+	"shelfcheck/internal/account"
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/libby"
 )
 
 type screen int
@@ -20,6 +22,8 @@ const (
 	searchScreen screen = iota
 	resultsScreen
 	detailScreen
+	accountScreen
+	wishlistScreen
 )
 
 var searchTypes = []bc.SearchType{bc.Keyword, bc.Title, bc.Author, bc.Subject, bc.Genre, bc.Series}
@@ -67,10 +71,31 @@ type Model struct {
 	details      map[string]*bc.Details
 	detailsErr   map[string]error
 
-	selected bc.Bib
-	vp       viewport.Model
-	spin     spinner.Model
-	err      error
+	selected   bc.Bib
+	backScreen screen // where esc on the detail screen returns to
+
+	// Account and wishlist screens; see account.go. acct is nil when the
+	// patron's files aren't available (e.g. over SSH).
+	acct        *account.Store
+	acctLoading bool
+	acctLoaded  bool
+	acctErr     error
+	checkouts   []bc.Checkout
+	holds       []bc.Hold
+	recent      []bc.HistoryItem
+	acctCursor  int
+
+	wishSeq     int
+	wishLoading bool
+	wishErr     error
+	wishTitles  []libby.Tagging
+	wishItems   []account.WishItem // checked so far, in list order
+	wishFailed  int
+	wishAll     bool
+	wishCursor  int
+	vp          viewport.Model
+	spin        spinner.Model
+	err         error
 }
 
 type (
@@ -99,7 +124,10 @@ type (
 // New builds the model. If query is non-empty it is searched immediately.
 // New builds the model. If homeOnly, searches start narrowed to titles on
 // the shelf at the home branch.
-func New(client *bc.Client, home string, homeOnly bool, query string) Model {
+//
+// acct gives access to the patron's account and Libby wishlist; pass nil to
+// leave those screens unavailable.
+func New(client *bc.Client, home string, homeOnly bool, query string, acct *account.Store) Model {
 	in := textinput.New()
 	in.Prompt = "› "
 	in.Placeholder = "title, author, subject…"
@@ -111,6 +139,7 @@ func New(client *bc.Client, home string, homeOnly bool, query string) Model {
 		client:       client,
 		home:         home,
 		homeOnly:     homeOnly,
+		acct:         acct,
 		homeName:     "branch " + home,
 		branches:     map[string]string{},
 		input:        in,
@@ -256,11 +285,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case accountMsg:
+		m.acctLoading = false
+		m.acctErr = msg.err
+		if msg.err == nil {
+			m.acctLoaded = true
+			m.checkouts, m.holds, m.recent = msg.checkouts, msg.holds, msg.recent
+			m.acctCursor = min(m.acctCursor, max(0, len(m.acctRows())-1))
+		}
+		return m, nil
+
+	case wishTitlesMsg, wishCheckedMsg:
+		return m.handleWishMsg(msg)
+
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
+		if mm, cmd, ok := m.navKey(msg.String()); ok {
+			return mm, cmd
+		}
 		switch m.screen {
+		case accountScreen:
+			return m.updateAccount(msg)
+		case wishlistScreen:
+			return m.updateWishlist(msg)
 		case searchScreen:
 			return m.updateSearch(msg)
 		case resultsScreen:
@@ -356,7 +405,7 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "esc", "backspace", "left", "h":
-		m.screen = resultsScreen
+		m.screen = m.backScreen
 		return m, nil
 	case "/", "s":
 		return m, m.toSearch()
@@ -390,21 +439,7 @@ func (m *Model) toSearch() tea.Cmd {
 }
 
 func (m Model) openDetail() (tea.Model, tea.Cmd) {
-	m.selected = m.results[m.cursor]
-	m.screen = detailScreen
-	id := m.selected.ID
-	var cmds []tea.Cmd
-	if !m.availPending[id] {
-		m.availPending[id] = true
-		cmds = append(cmds, m.fetchAvail(id))
-	}
-	if m.details[id] == nil {
-		delete(m.detailsErr, id)
-		cmds = append(cmds, m.fetchDetails(id))
-	}
-	m.refreshDetail()
-	m.vp.GotoTop()
-	return m, tea.Batch(cmds...)
+	return m.openBib(m.results[m.cursor], resultsScreen)
 }
 
 func (m *Model) refreshDetail() {

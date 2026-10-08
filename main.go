@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"shelfcheck/internal/account"
 	"shelfcheck/internal/bibliocommons"
 	"shelfcheck/internal/tui"
 )
@@ -63,7 +64,7 @@ func main() {
 	flag.Parse()
 
 	client := bibliocommons.New(o.library)
-	m := tui.New(client, o.home, !o.anywhere, strings.Join(flag.Args(), " "))
+	m := tui.New(client, o.home, !o.anywhere, strings.Join(flag.Args(), " "), account.DefaultStore(configDir()))
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "shelfcheck:", err)
 		os.Exit(1)

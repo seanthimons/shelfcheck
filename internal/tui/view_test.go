@@ -1,7 +1,13 @@
 package tui
 
 import (
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"shelfcheck/internal/account"
 
 	bc "shelfcheck/internal/bibliocommons"
 )
@@ -38,5 +44,49 @@ func TestFilterSummary(t *testing.T) {
 	}
 	if got := m.filterSummary(bc.Query{Text: "x"}); got != "" {
 		t.Errorf("empty filterSummary = %q", got)
+	}
+}
+
+func TestDueIn(t *testing.T) {
+	today := time.Now()
+	cases := map[string]string{
+		today.AddDate(0, 0, 10).Format("2006-01-02"): "· 10d",
+		today.AddDate(0, 0, 2).Format("2006-01-02"):  "· 2d",
+		today.Format("2006-01-02"):                   "today",
+		today.AddDate(0, 0, -3).Format("2006-01-02"): "overdue",
+		"garbage": "garbage",
+	}
+	for in, want := range cases {
+		if got := ansi.Strip(dueIn(in)); !strings.Contains(got, want) {
+			t.Errorf("dueIn(%q) = %q, want it to contain %q", in, got, want)
+		}
+	}
+}
+
+func TestHoldStatus(t *testing.T) {
+	for _, c := range []struct {
+		h    bc.Hold
+		want string
+	}{
+		{bc.Hold{Status: "SUSPENDED", Position: 1}, "paused · #1 in line"},
+		{bc.Hold{Status: "NOT_YET_AVAILABLE", Position: 4}, "#4 in line"},
+		{bc.Hold{Status: "READY_FOR_PICKUP"}, "ready for pickup"},
+	} {
+		if got := ansi.Strip(holdStatus(c.h)); got != c.want {
+			t.Errorf("holdStatus(%+v) = %q, want %q", c.h, got, c.want)
+		}
+	}
+}
+
+func TestBestMatchPrefersPrint(t *testing.T) {
+	w := account.WishItem{Matches: []account.WishMatch{
+		{Bib: bc.Bib{ID: "e"}, Online: true},
+		{Bib: bc.Bib{ID: "p"}},
+	}}
+	if b, ok := bestMatch(w); !ok || b.ID != "p" {
+		t.Errorf("bestMatch = %q, want print copy", b.ID)
+	}
+	if _, ok := bestMatch(account.WishItem{}); ok {
+		t.Error("bestMatch on unavailable item")
 	}
 }

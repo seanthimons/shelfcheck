@@ -49,7 +49,8 @@ func serve(args []string) error {
 	client := bibliocommons.New(o.library)
 
 	handler := func(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
-		return tui.New(client, o.home, !o.anywhere, strings.Join(sess.Command(), " ")), nil
+		// No account screens over SSH yet: the patron's files aren't deployed.
+		return tui.New(client, o.home, !o.anywhere, strings.Join(sess.Command(), " "), nil), nil
 	}
 
 	srv, err := wish.NewServer(

@@ -41,6 +41,10 @@ func (m Model) View() tea.View {
 		body = m.viewResults()
 	case detailScreen:
 		body = m.vp.View()
+	case accountScreen:
+		body = m.viewAccount()
+	case wishlistScreen:
+		body = m.viewWishlist()
 	}
 	body = lipgloss.NewStyle().Height(m.bodyHeight()).MaxHeight(m.bodyHeight()).Render(body)
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, m.viewHeader(), body, m.viewFooter()))
@@ -63,7 +67,7 @@ func (m Model) viewFooter() string {
 	var keys string
 	switch m.screen {
 	case searchScreen:
-		keys = "enter search · tab search type"
+		keys = "enter search · tab type · alt+w wishlist · alt+m my account"
 		if len(m.results) > 0 {
 			keys += " · esc back to results"
 		} else {
@@ -76,13 +80,17 @@ func (m Model) viewFooter() string {
 		case m.panel == panelValues:
 			keys = "↑↓ move · space/enter toggle · esc back"
 		default:
-			keys = "enter open · f filters · a home only · o sort · / search · q quit"
+			keys = "enter open · f filters · a home only · o sort · / search · w wishlist · m account · q quit"
 			if m.q.Narrowed() || m.q.Sort != "" {
-				keys = "enter open · f filters · F clear · a home only · o sort · / search · q quit"
+				keys = "enter open · f filters · F clear · a home only · o sort · / search · w wishlist · m account · q quit"
 			}
 		}
 	case detailScreen:
-		keys = "↑↓ scroll · r refresh · esc back · / search · q quit"
+		keys = "↑↓ scroll · r refresh · esc back · / search · w wishlist · m account · q quit"
+	case accountScreen:
+		keys = "↑↓ move · enter open · r refresh · w wishlist · / search · q quit"
+	case wishlistScreen:
+		keys = "↑↓ move · enter open · A show all · r recheck · m account · / search · q quit"
 	}
 	line := barStyle.Render(keys)
 	switch {

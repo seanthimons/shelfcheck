@@ -1,4 +1,4 @@
-package main
+package account
 
 import "testing"
 
@@ -13,7 +13,7 @@ func TestWishlistMatching(t *testing.T) {
 			t.Errorf("wishQuery(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if authorKey("Shirtaloon; Deverell, Travis") != "shirtaloon" || authorKey("Tchaikovsky, Adrian") != "tchaikovsky" {
+	if AuthorKey("Shirtaloon; Deverell, Travis") != "shirtaloon" || AuthorKey("Tchaikovsky, Adrian") != "tchaikovsky" {
 		t.Error("authorKey")
 	}
 	for _, c := range []struct {
@@ -30,8 +30,8 @@ func TestWishlistMatching(t *testing.T) {
 		{"Scythe", "Scythe", true},
 		{"Scy", "Scythe", false},
 	} {
-		if got := sameTitle(c.catalog, c.libby); got != c.want {
-			t.Errorf("sameTitle(%q, %q) = %v, want %v", c.catalog, c.libby, got, c.want)
+		if got := SameTitle(c.catalog, c.libby); got != c.want {
+			t.Errorf("SameTitle(%q, %q) = %v, want %v", c.catalog, c.libby, got, c.want)
 		}
 	}
 }

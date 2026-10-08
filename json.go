@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
+	"shelfcheck/internal/account"
 	bc "shelfcheck/internal/bibliocommons"
 	"shelfcheck/internal/libby"
 )
@@ -462,8 +462,7 @@ func jsonPatron(ctx context.Context, what string, args []string) error {
 	fs := flag.NewFlagSet("json "+what, flag.ContinueOnError)
 	var o options
 	o.registerCatalog(fs)
-	var files sessionFiles
-	files.register(fs)
+	st := registerStore(fs)
 	full := fs.Bool("full", false, "include descriptions and subjects")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -477,7 +476,7 @@ func jsonPatron(ctx context.Context, what string, args []string) error {
 		}
 		return patronItemOut{bookOut: bo}
 	}
-	err := files.withSession(ctx, client, func(s *bc.Session) error {
+	err := st.WithSession(ctx, client, func(s *bc.Session) error {
 		out = out[:0]
 		switch what {
 		case "history":
@@ -594,51 +593,6 @@ type wishMatchOut struct {
 	AvailableAt string `json:"available_at"` // the home branch's name, or "online"
 }
 
-var (
-	seriesSuffixRe = regexp.MustCompile(`,\s*\d+$`)
-	nonWordRe      = regexp.MustCompile(`[^\p{L}\p{N}]+`)
-)
-
-// wishQuery trims what trips up catalog title search: series numbers
-// ("..., 1") and subtitles.
-func wishQuery(title string) string {
-	t := seriesSuffixRe.ReplaceAllString(title, "")
-	if i := strings.IndexAny(t, ":;("); i > 3 {
-		t = t[:i]
-	}
-	return strings.TrimSpace(t)
-}
-
-// authorKey is the first author's last name, lowercased, for matching
-// Libby's "Last, First" against the catalog's.
-func authorKey(a string) string {
-	a = strings.Split(a, ";")[0]
-	last, _, _ := strings.Cut(a, ",")
-	return strings.ToLower(strings.TrimSpace(nonWordRe.ReplaceAllString(last, " ")))
-}
-
-// normTitle lowercases a title, reduces punctuation to single spaces and
-// drops a leading article.
-func normTitle(t string) string {
-	t = strings.TrimSpace(nonWordRe.ReplaceAllString(strings.ToLower(t), " "))
-	for _, a := range []string{"the ", "a ", "an "} {
-		t = strings.TrimPrefix(t, a)
-	}
-	return t
-}
-
-// sameTitle reports whether a catalog title names the same book as a Libby
-// title. Libby runs subtitles into the title ("Cadillac Desert The American
-// West...") while the catalog keeps them separate, so the catalog title must
-// equal the Libby title or be a whole-word prefix of it. A longer catalog
-// title ("Skyward Flight" for "Skyward") is a different book.
-func sameTitle(catalog, libbyTitle string) bool {
-	c, l := normTitle(catalog), normTitle(seriesSuffixRe.ReplaceAllString(libbyTitle, ""))
-	return c != "" && (c == l || strings.HasPrefix(l, c+" "))
-}
-
-var digitalFormats = map[string]bool{"EBOOK": true, "EAUDIOBOOK": true, "AB_ONLINE": true, "EMAG": true}
-
 func jsonWishlist(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json wishlist", flag.ContinueOnError)
 	var o options
@@ -646,101 +600,52 @@ func jsonWishlist(ctx context.Context, args []string) error {
 	tagName := fs.String("tag", "want to read", "Libby tag to check")
 	var formats listFlag
 	fs.Var(&formats, "format", "catalog formats to accept (default book, ebook); print must be on the shelf at -home, digital available to borrow now")
-	all := fs.Bool("all", false, "list every title, not just the ones on the shelf")
+	all := fs.Bool("all", false, "list every title, not just the ones available now")
 	lang := fs.String("lang", "eng", `catalog language code to accept ("" for any)`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if len(formats) == 0 {
-		formats = listFlag{"book", "ebook"}
-	}
-	var codes []string
-	digital := false
+	opts := account.WishOptions{Home: o.home, Language: *lang}
 	for _, f := range formats {
 		code, ok := formatAliases[strings.ToLower(f)]
 		if !ok {
 			code = strings.ToUpper(f)
 		}
-		codes = append(codes, code)
-		digital = digital || digitalFormats[code]
+		opts.Formats = append(opts.Formats, code)
 	}
-	saved, err := libby.Load(libbyPath())
+	lc, err := account.DefaultStore(configDir()).LibbyClient()
 	if err != nil {
 		return err
 	}
-	lc := libby.New(saved.Identity)
-	tags, err := lc.Tags(ctx)
+	items, err := account.WishlistTitles(ctx, lc, *tagName)
 	if err != nil {
 		return err
 	}
-	var tag *libby.Tag
-	for i := range tags {
-		if strings.EqualFold(tags[i].Name, *tagName) || strings.EqualFold(tags[i].Kind, *tagName) {
-			tag = &tags[i]
-		}
-	}
-	if tag == nil {
-		return fmt.Errorf("no Libby tag named %q", *tagName)
-	}
-	items, err := lc.Taggings(ctx, *tag)
-	if err != nil {
-		return err
-	}
-
 	client := bc.New(o.library)
-	branches := map[string]string{o.home: "branch " + o.home}
 	if locs, err := client.Locations(ctx); err == nil {
 		for _, l := range locs {
-			branches[l.Code] = l.Name
+			if l.Code == o.home {
+				opts.HomeName = l.Name
+			}
 		}
 	}
 	out := []wishOut{}
 	for _, it := range items {
-		if it.Format != "" && it.Format != "book" {
-			continue // magazines etc. have no print copy to find
-		}
-		w := wishOut{Title: it.Title, Author: it.Author}
-		if !it.Tagged.IsZero() {
-			w.Tagged = it.Tagged.Format("2006-01-02")
-		}
-		q := bc.Query{Text: wishQuery(it.Title), Type: bc.Title}
-		// STATUS values are ORed: on the shelf at home, or (for digital
-		// formats) available online now.
-		q.Toggle(bc.FacetStatus, o.home)
-		if digital {
-			q.Toggle(bc.FacetStatus, "_online_")
-		}
-		if *lang != "" {
-			q.Toggle(bc.FacetLanguage, *lang)
-		}
-		for _, code := range codes {
-			q.Toggle(bc.FacetFormat, code)
-		}
-		res, err := client.Search(ctx, q, 1)
+		w, err := account.CheckWish(ctx, client, it, opts)
 		if err != nil {
-			return fmt.Errorf("searching %q: %w", it.Title, err)
+			return err
 		}
-		want := authorKey(it.Author)
-		for _, b := range res.Bibs {
-			if !sameTitle(b.Title, it.Title) {
-				continue // same author, different book
-			}
-			for _, a := range b.Authors {
-				if want != "" && authorKey(a) == want {
-					bo := newBookOut(o.library, b)
-					bo.Description, bo.Subjects, bo.ISBNs = "", nil, nil
-					at := branches[o.home]
-					if b.Digital || digitalFormats[b.Format] {
-						at = "online"
-					}
-					w.Matches = append(w.Matches, wishMatchOut{bookOut: bo, AvailableAt: at})
-					break
-				}
-			}
+		wo := wishOut{Title: it.Title, Author: it.Author, Available: w.Available()}
+		if !it.Tagged.IsZero() {
+			wo.Tagged = it.Tagged.Format("2006-01-02")
 		}
-		w.Available = len(w.Matches) > 0
-		if w.Available || *all {
-			out = append(out, w)
+		for _, m := range w.Matches {
+			bo := newBookOut(o.library, m.Bib)
+			bo.Description, bo.Subjects, bo.ISBNs = "", nil, nil
+			wo.Matches = append(wo.Matches, wishMatchOut{bookOut: bo, AvailableAt: m.AvailableAt})
+		}
+		if wo.Available || *all {
+			out = append(out, wo)
 		}
 	}
 	return writeJSON(out)

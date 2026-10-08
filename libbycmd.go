@@ -20,8 +20,6 @@ const libbyUsage = `usage: shelfcheck libby <command>
   probe [-out dir]   save raw Libby account data (sync, tags) for inspection
 `
 
-func libbyPath() string { return filepath.Join(configDir(), "libby.json") }
-
 func libbyCmd(args []string) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "help" {
 		fmt.Fprint(os.Stderr, libbyUsage)
