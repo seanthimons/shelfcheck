@@ -1,7 +1,8 @@
 // Package recommend suggests books a patron can get right now (print on the
 // shelf at their home branch, or an ebook to borrow) from their reading
 // record: the next book in series they're reading, more by authors they
-// return to, wishlist titles, and well-rated books in their genres.
+// return to, wishlist titles, books Hardcover readers pair with ones they
+// liked, and (without Hardcover) well-rated books in their genres.
 package recommend
 
 import (
@@ -27,13 +28,16 @@ type Options struct {
 	MaxSeries  int // active series to look up; default 8
 	MaxAuthors int // authors to look up; default 8
 	MaxGenres  int // genres to search; default 3
+	MaxSeeds   int // liked books to find readers' co-picks for; default 6
+	MaxPicked  int // co-picked books to look for in the catalog; default 20
 
 	// Wishlist, if non-nil, holds already-checked wishlist titles (from
 	// account.CheckWish); available ones become candidates.
 	Wishlist []account.WishItem
 
 	// Hardcover, if set, supplies series order, which library records
-	// often lack or get wrong.
+	// often lack or get wrong, and what readers pick alongside books the
+	// patron liked (prompts and lists), which replaces the genre picks.
 	Hardcover *hardcover.Client
 
 	// Debug, if set, receives a line per decision.
@@ -55,6 +59,12 @@ func (o Options) withDefaults() Options {
 	if o.MaxGenres == 0 {
 		o.MaxGenres = 3
 	}
+	if o.MaxSeeds == 0 {
+		o.MaxSeeds = 6
+	}
+	if o.MaxPicked == 0 {
+		o.MaxPicked = 20
+	}
 	if o.HomeName == "" {
 		o.HomeName = "branch " + o.Home
 	}
@@ -74,8 +84,11 @@ type Pick struct {
 	Ebook   bool   // an ebook can be borrowed now
 	Score   float64
 	Reasons []string
-	key     string
-	why     map[string]reason // strongest reason of each kind
+	// From is the Hardcover prompt or list behind a "readers also picked"
+	// reason, as a URL.
+	From string
+	key  string
+	why  map[string]reason // strongest reason of each kind
 }
 
 type reason struct {
@@ -88,7 +101,9 @@ type reason struct {
 type Profile struct {
 	// UpNext lists the next book in active series when it isn't available
 	// now (checked out, not owned, or not out yet).
-	UpNext  []UpNext
+	UpNext []UpNext
+	// Seeds are the liked books whose readers' co-picks were looked up.
+	Seeds   []string
 	Series  []SeriesTaste
 	Authors []AuthorTaste
 	Genres  []GenreTaste
@@ -149,9 +164,15 @@ func BuildProfile(rec *account.Record, now time.Time) Profile {
 			continue
 		}
 		p.Read++
+		if b.Stars > 0 && b.Stars < 2.5 {
+			continue // read it, didn't like it
+		}
 		w, when := recency(b.Date, now)
 		if b.Shelf == account.ShelfCurrent {
 			w, when = 1, now
+		}
+		if b.Stars >= 4 {
+			w *= 1.5
 		}
 		if len(b.Authors) > 0 {
 			k := account.AuthorKey(b.Authors[0])
@@ -249,6 +270,7 @@ func Recommend(ctx context.Context, client *bc.Client, rec *account.Record, opts
 		{"wishlist", e.wishlist},
 		{"series you're reading", e.series},
 		{"authors you come back to", e.authors},
+		{"what readers also picked", e.alsoPicked},
 		{"your genres", e.genres},
 	}
 	var errs []string
@@ -263,7 +285,7 @@ func Recommend(ctx context.Context, client *bc.Client, rec *account.Record, opts
 		}
 	}
 	picks := e.ranked()
-	prof.UpNext = e.upNext
+	prof.UpNext, prof.Seeds = e.upNext, e.seeds
 	progress("done", picks)
 	if len(errs) > 0 && len(picks) == 0 {
 		return nil, prof, fmt.Errorf("recommend: %s", strings.Join(errs, "; "))
@@ -278,6 +300,8 @@ type engine struct {
 	opts   Options
 	picks  map[string]*Pick
 	upNext []UpNext
+	seeds  []string
+	picked int // co-picks found in the catalog
 	// ahead holds works further along a series than the patron's next
 	// book (from Hardcover), which other stages shouldn't suggest.
 	ahead map[string]bool
@@ -468,7 +492,7 @@ func (e *engine) hardcoverSeries(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if found == 0 && t.b.Position > maxRead {
+			if len(found) == 0 && t.b.Position > maxRead {
 				e.upNext = append(e.upNext, UpNext{Series: hs.Name, Position: t.b.Position, Title: t.b.Title, Author: t.b.Author})
 			}
 		}
@@ -477,15 +501,15 @@ func (e *engine) hardcoverSeries(ctx context.Context) error {
 }
 
 // findTitle searches the catalog for a specific book, available now, and adds
-// matching copies.
-func (e *engine) findTitle(ctx context.Context, title, author, kind string, score float64, reason string) (int, error) {
-	q := e.availableQuery(title, bc.Title)
+// matching copies, returning the picks they went to.
+func (e *engine) findTitle(ctx context.Context, title, author, kind string, score float64, reason string) ([]*Pick, error) {
+	q := e.availableQuery(shortTitle(title), bc.Title)
 	res, err := e.client.Search(ctx, q, 1)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	want := account.AuthorKey(author)
-	found := 0
+	var found []*Pick
 	for _, b := range res.Bibs {
 		if len(b.Authors) == 0 || account.AuthorKey(b.Authors[0]) != want {
 			continue
@@ -493,11 +517,49 @@ func (e *engine) findTitle(ctx context.Context, title, author, kind string, scor
 		if account.WorkKey(b.Title, b.Authors[0]) != account.WorkKey(title, author) && !account.SameTitle(b.Title, title) {
 			continue
 		}
-		found++
-		e.add(b, kind, score, reason)
+		if subtitlesClash(b.Subtitle, title) {
+			continue // "Mistborn: Secret History" isn't "Mistborn: The Final Empire"
+		}
+		if p := e.add(b, kind, score, reason); p != nil {
+			found = append(found, p)
+		}
 	}
-	e.opts.Debug("    catalog: %d results, %d matched", len(res.Bibs), found)
+	e.opts.Debug("    catalog: %d results, %d matched", len(res.Bibs), len(found))
 	return found, nil
+}
+
+// subtitlesClash reports whether a catalog subtitle and the subtitle in
+// title (after a colon) name different books. Either missing, or a generic
+// one ("A Novel"), is no clash.
+func subtitlesClash(catalogSub, title string) bool {
+	_, wantSub, ok := strings.Cut(title, ":")
+	norm := func(s string) string {
+		s = strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r > 127)
+		}), " ")
+		if s == "a novel" || strings.HasPrefix(s, "a novel ") || strings.HasSuffix(s, " novel") {
+			return ""
+		}
+		return s
+	}
+	c, w := norm(catalogSub), norm(wantSub)
+	if !ok || c == "" || w == "" {
+		return false
+	}
+	return !strings.HasPrefix(c, w) && !strings.HasPrefix(w, c)
+}
+
+// shortTitle drops what trips up a catalog title search: a subtitle
+// ("Babel, or The Necessity of Violence: An Arcane History...") or a
+// parenthetical series note.
+func shortTitle(t string) string {
+	if i := strings.IndexAny(t, ":("); i > 3 {
+		t = t[:i]
+	}
+	if i := strings.Index(strings.ToLower(t), ", or "); i > 3 {
+		t = t[:i]
+	}
+	return strings.TrimSpace(t)
 }
 
 // placeholderTitle spots announced-but-unnamed books ("Untitled", "TBA").
@@ -571,7 +633,12 @@ func (e *engine) readsSeries(b bc.Bib) bool {
 	return false
 }
 
+// genres runs when Hardcover can't say what readers pair with the patron's
+// books: top-rated catalog titles in their genres are a weak stand-in.
 func (e *engine) genres(ctx context.Context) error {
+	if e.picked > 0 {
+		return nil
+	}
 	n := 0
 	for _, g := range e.prof.Genres {
 		if n >= e.opts.MaxGenres {

@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,9 @@ type Client struct {
 	Token    string
 	Endpoint string
 	HTTP     *http.Client
+	// CacheDir, if set, keeps AlsoPicked results for a week: they change
+	// slowly, and Hardcover's rate limit makes them slow to gather.
+	CacheDir string
 
 	throttle sync.Mutex
 	last     time.Time
@@ -44,8 +48,43 @@ func New(token string) *Client {
 // Hardcover allows about 60 requests a minute.
 const minInterval = time.Second
 
-// Query runs a GraphQL query and decodes its data into out.
+// Query runs a GraphQL query and decodes its data into out. When Hardcover
+// says to slow down, it waits as told and tries again, a few times.
 func (c *Client) Query(ctx context.Context, query string, vars map[string]any, out any) error {
+	for attempt := 0; ; attempt++ {
+		err := c.query(ctx, query, vars, out)
+		var rl *rateLimited
+		if !errors.As(err, &rl) || attempt >= 4 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(rl.wait):
+		}
+	}
+}
+
+// rateLimited is an HTTP 429 and how long to wait.
+type rateLimited struct{ wait time.Duration }
+
+func (r *rateLimited) Error() string {
+	return fmt.Sprintf("hardcover: rate limited; retry in %v", r.wait)
+}
+
+var retryInRe = regexp.MustCompile(`(?i)try again in (\d+) seconds?`)
+
+func retryAfter(resp *http.Response, body []byte) time.Duration {
+	secs := 2
+	if n, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
+		secs = n
+	} else if m := retryInRe.FindSubmatch(body); m != nil {
+		secs, _ = strconv.Atoi(string(m[1]))
+	}
+	return time.Duration(min(max(secs, 1), 60))*time.Second + 250*time.Millisecond
+}
+
+func (c *Client) query(ctx context.Context, query string, vars map[string]any, out any) error {
 	c.throttle.Lock()
 	if d := time.Until(c.last.Add(minInterval)); d > 0 {
 		select {
@@ -75,10 +114,31 @@ func (c *Client) Query(ctx context.Context, query string, vars map[string]any, o
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait := retryAfter(resp, b)
+		c.throttle.Lock()
+		c.last = time.Now().Add(wait - minInterval) // hold back other callers too
+		c.throttle.Unlock()
+		return &rateLimited{wait}
+	}
 	if resp.StatusCode/100 != 2 {
+		// Hardcover explains refusals (over capacity, bad token) in
+		// "message".
+		var e struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(b, &e) == nil && e.Message != "" {
+			if strings.Contains(strings.ToLower(e.Message), "token") || strings.Contains(strings.ToLower(e.Message), "jwt") {
+				return ErrUnauthorized
+			}
+			return fmt.Errorf("hardcover: HTTP %d: %s", resp.StatusCode, e.Message)
+		}
+		if resp.StatusCode == http.StatusForbidden {
+			return ErrUnauthorized
+		}
 		return fmt.Errorf("hardcover: HTTP %d: %.200s", resp.StatusCode, b)
 	}
 	var env struct {

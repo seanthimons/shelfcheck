@@ -13,6 +13,7 @@ import (
 
 	"shelfcheck/internal/account"
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/hardcover"
 	"shelfcheck/internal/libby"
 	"shelfcheck/internal/recommend"
 )
@@ -31,7 +32,8 @@ commands:
   holds                       your holds, incl. Libby/OverDrive        (needs shelfcheck login)
   libby                       your Libby tags: borrowed, sampled, wishlists (needs shelfcheck libby link)
   recommend                   picks you can get now, from your reading record (needs login and/or libby link)
-  wishlist                    which "want to read" titles you can get now: print on the shelf at -home, or ebooks (needs libby link)
+  wishlist                    which "want to read" titles you can get now: print on the shelf at -home, or ebooks (needs libby link and/or HARDCOVER_TOKEN)
+  prompt <url|slug>           which books from a Hardcover prompt or list you can get now (needs HARDCOVER_TOKEN)
 
 Run "shelfcheck json <command> -h" for a command's flags.
 `
@@ -59,6 +61,8 @@ func jsonCmd(args []string) error {
 		err = jsonWishlist(ctx, args[1:])
 	case "recommend":
 		err = jsonRecommend(ctx, args[1:])
+	case "prompt":
+		err = jsonPrompt(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], jsonUsage)
 	}
@@ -617,13 +621,12 @@ func jsonWishlist(ctx context.Context, args []string) error {
 		}
 		opts.Formats = append(opts.Formats, code)
 	}
-	lc, err := account.DefaultStore(configDir()).LibbyClient()
+	items, err := account.DefaultStore(configDir()).WantToRead(ctx, *tagName)
 	if err != nil {
-		return err
-	}
-	items, err := account.WishlistTitles(ctx, lc, *tagName)
-	if err != nil {
-		return err
+		if len(items) == 0 {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "shelfcheck: warning:", err)
 	}
 	client := bc.New(o.library)
 	if locs, err := client.Locations(ctx); err == nil {
@@ -655,6 +658,93 @@ func jsonWishlist(ctx context.Context, args []string) error {
 	return writeJSON(out)
 }
 
+// --- prompt -----------------------------------------------------------------
+
+type promptOut struct {
+	Kind    string          `json:"kind"` // "prompt" or "list"
+	Title   string          `json:"title"`
+	URL     string          `json:"url"`
+	Readers int             `json:"readers,omitempty"`
+	Books   []promptBookOut `json:"books"`
+}
+
+type promptBookOut struct {
+	Title     string         `json:"title"`
+	Author    string         `json:"author,omitempty"`
+	Votes     int            `json:"votes,omitempty"`         // readers who gave it, for prompts
+	Yours     string         `json:"on_your_shelf,omitempty"` // its status in your Hardcover library
+	Available bool           `json:"available_now"`
+	Matches   []wishMatchOut `json:"matches,omitempty"`
+}
+
+func jsonPrompt(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("json prompt", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), `usage: shelfcheck json prompt [flags] <url|slug>
+
+Checks the books from a Hardcover prompt (most-given answers first) or list
+(in list order) against the catalog: print on the shelf at -home, or ebooks
+to borrow now. Takes https://hardcover.app/prompts/<slug>,
+https://hardcover.app/@<user>/lists/<slug>, or a bare prompt slug.`)
+		fs.PrintDefaults()
+	}
+	var o options
+	o.registerCatalog(fs)
+	limit := fs.Int("limit", 30, "books to check")
+	all := fs.Bool("all", false, "list every book, not just the ones available now")
+	lang := fs.String("lang", "eng", `catalog language code to accept ("" for any)`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return fmt.Errorf("need one prompt or list")
+	}
+	ref, ok := hardcover.ParseRef(fs.Arg(0))
+	if !ok {
+		return fmt.Errorf("%q isn't a Hardcover prompt or list URL", fs.Arg(0))
+	}
+	hc := account.DefaultStore(configDir()).HardcoverClient()
+	if hc == nil {
+		return fmt.Errorf("set HARDCOVER_TOKEN (environment or %s)", account.DefaultStore(configDir()).Credentials)
+	}
+	col, err := hc.Collection(ctx, ref, *limit)
+	if err != nil {
+		return err
+	}
+	lib, err := hc.Library(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "shelfcheck: warning: your Hardcover library:", err)
+	}
+	shelves := hardcover.Shelves(lib)
+	client := bc.New(o.library)
+	opts := account.WishOptions{Home: o.home, Language: *lang}
+	if locs, err := client.Locations(ctx); err == nil {
+		for _, l := range locs {
+			if l.Code == o.home {
+				opts.HomeName = l.Name
+			}
+		}
+	}
+	out := promptOut{Kind: col.Kind, Title: col.Title, URL: col.URL, Readers: col.Readers, Books: []promptBookOut{}}
+	for _, b := range col.Books {
+		w, err := account.CheckWish(ctx, client, libby.Tagging{Title: b.Title, Author: b.Author, Format: "book"}, opts)
+		if err != nil {
+			return err
+		}
+		po := promptBookOut{Title: b.Title, Author: b.Author, Votes: b.Votes, Yours: shelves[b.ID].String(), Available: w.Available()}
+		for _, m := range w.Matches {
+			bo := newBookOut(o.library, m.Bib)
+			bo.Description, bo.Subjects, bo.ISBNs = "", nil, nil
+			po.Matches = append(po.Matches, wishMatchOut{bookOut: bo, AvailableAt: m.AvailableAt})
+		}
+		if po.Available || *all {
+			out.Books = append(out.Books, po)
+		}
+	}
+	return writeJSON(out)
+}
+
 // --- recommend --------------------------------------------------------------
 
 type pickOut struct {
@@ -663,10 +753,12 @@ type pickOut struct {
 	EbookNow      bool     `json:"ebook_now"`
 	Score         float64  `json:"score"`
 	Why           []string `json:"why"`
+	From          string   `json:"hardcover,omitempty"` // prompt or list behind a "readers also picked" reason
 }
 
 type profileOut struct {
 	UpNext    []string `json:"up_next_not_available,omitempty"`
+	Seeds     []string `json:"also_picked_from,omitempty"`
 	BooksRead int      `json:"books_read"`
 	Series    []string `json:"active_series"`
 	Authors   []string `json:"top_authors"`
@@ -678,7 +770,7 @@ func jsonRecommend(ctx context.Context, args []string) error {
 	var o options
 	o.registerCatalog(fs)
 	limit := fs.Int("limit", 20, "number of picks")
-	withWish := fs.Bool("wishlist", false, "also check your Libby want-to-read list (~25s more)")
+	withWish := fs.Bool("wishlist", false, "also check your want-to-read list, Libby and Hardcover (~25s more)")
 	verbose := fs.Bool("v", false, "print progress to stderr")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -700,14 +792,13 @@ func jsonRecommend(ctx context.Context, args []string) error {
 			}
 		}
 	}
-	if *withWish && st.HasLibby() {
-		lc, err := st.LibbyClient()
+	if *withWish && (st.HasLibby() || st.HasHardcover()) {
+		titles, err := st.WantToRead(ctx, "want to read")
 		if err != nil {
-			return err
-		}
-		titles, err := account.WishlistTitles(ctx, lc, "want to read")
-		if err != nil {
-			return err
+			if len(titles) == 0 {
+				return err
+			}
+			fmt.Fprintln(os.Stderr, "shelfcheck: warning:", err)
 		}
 		for _, t := range titles {
 			w, err := account.CheckWish(ctx, client, t, account.WishOptions{Home: o.home, HomeName: opts.HomeName, Language: "eng"})
@@ -732,7 +823,7 @@ func jsonRecommend(ctx context.Context, args []string) error {
 		Profile profileOut `json:"profile"`
 		Picks   []pickOut  `json:"picks"`
 	}{Picks: []pickOut{}}
-	out.Profile.BooksRead = prof.Read
+	out.Profile.BooksRead, out.Profile.Seeds = prof.Read, prof.Seeds
 	for _, u := range prof.UpNext {
 		out.Profile.UpNext = append(out.Profile.UpNext, fmt.Sprintf("%s #%v: %s by %s", u.Series, u.Position, u.Title, u.Author))
 	}
@@ -754,7 +845,7 @@ func jsonRecommend(ctx context.Context, args []string) error {
 	for _, p := range picks {
 		bo := newBookOut(o.library, p.Bib)
 		bo.Subjects, bo.ISBNs = nil, nil
-		out.Picks = append(out.Picks, pickOut{bookOut: bo, OnShelfAtHome: p.Print, EbookNow: p.Ebook, Score: round1(p.Score), Why: p.Reasons})
+		out.Picks = append(out.Picks, pickOut{bookOut: bo, OnShelfAtHome: p.Print, EbookNow: p.Ebook, Score: round1(p.Score), Why: p.Reasons, From: p.From})
 	}
 	return writeJSON(out)
 }

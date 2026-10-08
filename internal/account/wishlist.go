@@ -2,11 +2,14 @@ package account
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/hardcover"
 	"shelfcheck/internal/libby"
 )
 
@@ -87,6 +90,46 @@ func WishlistTitles(ctx context.Context, lc *libby.Client, tagName string) ([]li
 		return books, err
 	}
 	return nil, fmt.Errorf("no Libby tag named %q", tagName)
+}
+
+// WantToRead gathers want-to-read titles from every source set up: the
+// Libby tag tagName and, when tagName is "want to read", the Hardcover
+// library's Want to Read shelf. A title on both is listed once, as Libby has
+// it. If a source fails, the others' titles come back with its error.
+func (s *Store) WantToRead(ctx context.Context, tagName string) ([]libby.Tagging, error) {
+	var out []libby.Tagging
+	var errs []error
+	seen := map[string]bool{}
+	if s.HasLibby() {
+		lc, err := s.LibbyClient()
+		if err == nil {
+			var items []libby.Tagging
+			items, err = WishlistTitles(ctx, lc, tagName)
+			for _, it := range items {
+				seen[WorkKey(it.Title, it.Author)] = true
+			}
+			out = append(out, items...)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("libby: %w", err))
+		}
+	}
+	if hc := s.HardcoverClient(); hc != nil && strings.EqualFold(tagName, "want to read") {
+		lib, err := hc.Library(ctx)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		for _, ub := range lib {
+			if ub.Status != hardcover.WantToRead || seen[WorkKey(ub.Title, ub.Author)] {
+				continue
+			}
+			seen[WorkKey(ub.Title, ub.Author)] = true
+			it := libby.Tagging{Title: ub.Title, Author: ub.Author, Format: "book"}
+			it.Tagged, _ = time.Parse("2006-01-02", ub.Added)
+			out = append(out, it)
+		}
+	}
+	return out, errors.Join(errs...)
 }
 
 // CheckWish searches the catalog for one wishlist title and returns the

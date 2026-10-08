@@ -239,18 +239,20 @@ func (m Model) viewAccount() string {
 func (m Model) openWishlist() (Model, tea.Cmd) {
 	m.screen = wishlistScreen
 	m.input.Blur()
-	if m.acct == nil || !m.acct.HasLibby() || m.wishLoading || m.wishTitles != nil {
+	if !m.hasWishlist() || m.wishLoading || m.wishTitles != nil {
 		return m, nil
 	}
 	return m.loadWishlist()
 }
 
+// hasWishlist reports whether there's a want-to-read list to check: Libby's
+// or Hardcover's.
+func (m Model) hasWishlist() bool {
+	return m.acct != nil && (m.acct.HasLibby() || m.acct.HasHardcover())
+}
+
 func (m Model) loadWishlist() (Model, tea.Cmd) {
-	lc, err := m.acct.LibbyClient()
-	if err != nil {
-		m.wishErr = err
-		return m, nil
-	}
+	st := m.acct
 	m.wishSeq++
 	m.wishLoading = true
 	m.wishErr = nil
@@ -260,7 +262,7 @@ func (m Model) loadWishlist() (Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		titles, err := account.WishlistTitles(ctx, lc, "want to read")
+		titles, err := st.WantToRead(ctx, "want to read")
 		return wishTitlesMsg{seq: seq, titles: titles, err: err}
 	}
 }
@@ -284,8 +286,10 @@ func (m Model) handleWishMsg(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.seq != m.wishSeq {
 			return m, nil
 		}
-		if msg.err != nil {
-			m.wishLoading, m.wishErr = false, msg.err
+		// One source failing (say, Libby) still leaves the other's titles.
+		m.wishErr = msg.err
+		if msg.err != nil && len(msg.titles) == 0 {
+			m.wishLoading = false
 			return m, nil
 		}
 		m.wishTitles = msg.titles
@@ -330,7 +334,7 @@ func (m Model) updateWishlist(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc", "/", "s":
 		return m, m.toSearch()
 	case "r":
-		if m.acct != nil && m.acct.HasLibby() {
+		if m.hasWishlist() {
 			return m.loadWishlist()
 		}
 	case "A":
@@ -383,13 +387,13 @@ func bestMatch(w account.WishItem) (bc.Bib, bool) {
 
 func (m Model) viewWishlist() string {
 	switch {
-	case m.acct == nil || !m.acct.HasLibby():
-		return "\n  " + titleStyle.Render("Libby isn't linked here.") +
-			"\n\n  In Libby: Menu > Copy To Another Device, then run:\n  shelfcheck libby link <8-digit code>"
-	case m.wishErr != nil && m.wishItems == nil:
+	case !m.hasWishlist():
+		return "\n  " + titleStyle.Render("No want-to-read list here.") +
+			"\n\n  Link Libby (in Libby: Menu > Copy To Another Device, then run\n  shelfcheck libby link <8-digit code>), or set HARDCOVER_TOKEN for your Hardcover list."
+	case m.wishErr != nil && m.wishTitles == nil:
 		return "\n  " + errStyle.Render("Couldn't load your wishlist: "+m.wishErr.Error()) + "\n\n  Press r to try again."
 	case m.wishTitles == nil:
-		return "\n  " + m.spin.View() + " Loading your Libby want-to-read list…"
+		return "\n  " + m.spin.View() + " Loading your want-to-read list…"
 	}
 
 	items := m.wishVisible()
@@ -407,6 +411,9 @@ func (m Model) viewWishlist() string {
 	}
 	if m.wishFailed > 0 {
 		head += errStyle.Render(fmt.Sprintf(" · %d couldn't be checked", m.wishFailed))
+	}
+	if m.wishErr != nil {
+		head += errStyle.Render(" · " + m.wishErr.Error())
 	}
 	sub := "  " + dimStyle.Render("print on the shelf at "+m.homeName+", or ebooks you can borrow now")
 	if m.wishAll {
@@ -430,20 +437,24 @@ func (m Model) viewWishlist() string {
 }
 
 func wishLine(it account.WishItem, w int, homeName string) string {
-	where := dimStyle.Render("not available now")
-	switch {
-	case it.OnShelf() && it.OnlineNow():
-		where = okStyle.Render("on shelf") + dimStyle.Render(" + ") + accentStyle.Render("ebook")
-	case it.OnShelf():
-		where = okStyle.Render("on shelf")
-	case it.OnlineNow():
-		where = accentStyle.Render("ebook now")
-	}
 	b, ok := bestMatch(it)
 	if !ok {
 		b = bc.Bib{Title: it.Tagging.Title, Authors: []string{it.Tagging.Author}}
 	}
-	return bookLine(b, w, "", where)
+	return bookLine(b, w, "", wishWhere(it))
+}
+
+// wishWhere says where a title can be had now.
+func wishWhere(it account.WishItem) string {
+	switch {
+	case it.OnShelf() && it.OnlineNow():
+		return okStyle.Render("on shelf") + dimStyle.Render(" + ") + accentStyle.Render("ebook")
+	case it.OnShelf():
+		return okStyle.Render("on shelf")
+	case it.OnlineNow():
+		return accentStyle.Render("ebook now")
+	}
+	return dimStyle.Render("not available now")
 }
 
 // --- shared row formatting --------------------------------------------------

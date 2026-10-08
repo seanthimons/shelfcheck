@@ -33,7 +33,7 @@ type (
 func (m Model) openForYou() (Model, tea.Cmd) {
 	m.screen = forYouScreen
 	m.input.Blur()
-	if m.acct == nil || (!m.acct.HasCatalog() && !m.acct.HasLibby()) || m.recLoading || m.recDone {
+	if m.acct == nil || !m.hasRecord() || m.recLoading || m.recDone {
 		return m, nil
 	}
 	return m.loadForYou()
@@ -75,6 +75,11 @@ func (m Model) loadForYou() (Model, tea.Cmd) {
 		ch <- recDoneMsg{seq: seq, picks: picks, profile: prof, err: err}
 	}()
 	return m, waitRec(ch)
+}
+
+// hasRecord reports whether any source of reading history is set up.
+func (m Model) hasRecord() bool {
+	return m.acct.HasCatalog() || m.acct.HasLibby() || m.acct.HasHardcover()
 }
 
 func waitRec(ch <-chan tea.Msg) tea.Cmd {
@@ -145,6 +150,10 @@ func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.recCursor < n {
 			return m.openBib(m.recPicks[m.recCursor].Bib, forYouScreen)
 		}
+	case "h":
+		if m.recCursor < n && m.recPicks[m.recCursor].From != "" {
+			return m.openHardcover(m.recPicks[m.recCursor].From, forYouScreen)
+		}
 	}
 	m.recCursor = max(0, min(m.recCursor, n-1))
 	return m, nil
@@ -152,9 +161,9 @@ func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) viewForYou() string {
 	switch {
-	case m.acct == nil || (!m.acct.HasCatalog() && !m.acct.HasLibby()):
+	case m.acct == nil || !m.hasRecord():
 		return "\n  " + titleStyle.Render("Recommendations need your reading history.") +
-			"\n\n  Set up your library login (shelfcheck login) and/or Libby (shelfcheck libby link <code>)."
+			"\n\n  Set up your library login (shelfcheck login), Libby (shelfcheck libby link <code>)\n  and/or Hardcover (HARDCOVER_TOKEN)."
 	case m.recErr != nil && len(m.recPicks) == 0:
 		return "\n  " + errStyle.Render("Couldn't build recommendations: "+m.recErr.Error()) + "\n\n  Press r to try again."
 	case len(m.recPicks) == 0:

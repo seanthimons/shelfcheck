@@ -67,6 +67,9 @@ func (s *Store) HasLibby() bool {
 	return err == nil
 }
 
+// HasHardcover reports whether a Hardcover token is set.
+func (s *Store) HasHardcover() bool { return s.HardcoverClient() != nil }
+
 // HardcoverClient returns a Hardcover API client using HARDCOVER_TOKEN from
 // the environment or the credentials file, or nil if there's no token.
 func (s *Store) HardcoverClient() *hardcover.Client {
@@ -78,7 +81,11 @@ func (s *Store) HardcoverClient() *hardcover.Client {
 	if tok == "" {
 		return nil
 	}
-	return hardcover.New(tok)
+	c := hardcover.New(tok)
+	if dir, err := os.UserCacheDir(); err == nil {
+		c.CacheDir = filepath.Join(dir, "shelfcheck", "hardcover")
+	}
+	return c
 }
 
 // envFile reads KEY=value lines from the credentials file, refusing a file

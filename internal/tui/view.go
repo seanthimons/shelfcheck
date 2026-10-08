@@ -47,6 +47,8 @@ func (m Model) View() tea.View {
 		body = m.viewWishlist()
 	case forYouScreen:
 		body = m.viewForYou()
+	case hardcoverScreen:
+		body = m.viewHardcover()
 	}
 	body = lipgloss.NewStyle().Height(m.bodyHeight()).MaxHeight(m.bodyHeight()).Render(body)
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, m.viewHeader(), body, m.viewFooter()))
@@ -69,7 +71,7 @@ func (m Model) viewFooter() string {
 	var keys string
 	switch m.screen {
 	case searchScreen:
-		keys = "enter search · tab type · alt+p for you · alt+w wishlist · alt+m account"
+		keys = "enter search (or paste a Hardcover prompt/list link) · tab type · alt+p for you · alt+w wishlist · alt+m account"
 		if len(m.results) > 0 {
 			keys += " · esc back to results"
 		} else {
@@ -92,7 +94,9 @@ func (m Model) viewFooter() string {
 	case accountScreen:
 		keys = "↑↓ move · enter open · r refresh · p for you · w wishlist · / search · q quit"
 	case forYouScreen:
-		keys = "↑↓ move · enter open · r refresh · w wishlist · m account · / search · q quit"
+		keys = "↑↓ move · enter open · h Hardcover prompt/list · r refresh · w wishlist · m account · / search · q quit"
+	case hardcoverScreen:
+		keys = "↑↓ move · enter open · A show all · r recheck · esc back · p for you · w wishlist · / search · q quit"
 	case wishlistScreen:
 		keys = "↑↓ move · enter open · A show all · r recheck · p for you · m account · / search · q quit"
 	}

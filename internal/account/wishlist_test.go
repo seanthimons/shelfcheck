@@ -56,3 +56,17 @@ func TestSplitSeries(t *testing.T) {
 		t.Error("WorkKey should ignore series numbers and co-authors")
 	}
 }
+
+func TestWorkKeyAlternativeTitles(t *testing.T) {
+	a := WorkKey("Babel: Or the Necessity of Violence: An Arcane History of the Oxford Translators' Revolution", "Kuang, R. F.")
+	b := WorkKey("Babel, or The Necessity of Violence: An Arcane History of the Oxford Translators' Revolution", "R.F. Kuang")
+	if a != b || a != "babel|kuang" {
+		t.Errorf("Babel keys differ: %q vs %q", a, b)
+	}
+	if k := WorkKey("Upgrade: A Novel", "Blake Crouch"); k != "upgrade|crouch" {
+		t.Errorf("Upgrade key = %q", k)
+	}
+	if k := WorkKey("Orbital", "Samantha Harvey"); k != "orbital|harvey" {
+		t.Errorf("Orbital key = %q", k)
+	}
+}

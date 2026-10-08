@@ -26,6 +26,7 @@ const (
 	accountScreen
 	wishlistScreen
 	forYouScreen
+	hardcoverScreen
 )
 
 var searchTypes = []bc.SearchType{bc.Keyword, bc.Title, bc.Author, bc.Subject, bc.Genre, bc.Series}
@@ -105,9 +106,12 @@ type Model struct {
 	recPicks   []recommend.Pick
 	recProfile recommend.Profile
 	recCursor  int
-	vp         viewport.Model
-	spin       spinner.Model
-	err        error
+
+	hc hcState // Hardcover prompt or list; see hardcover.go
+
+	vp   viewport.Model
+	spin spinner.Model
+	err  error
 }
 
 type (
@@ -313,6 +317,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case recProgressMsg, recDoneMsg:
 		return m.handleRecMsg(msg)
 
+	case hcCollectionMsg, hcCheckedMsg:
+		return m.handleHardcoverMsg(msg)
+
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -327,6 +334,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateWishlist(msg)
 		case forYouScreen:
 			return m.updateForYou(msg)
+		case hardcoverScreen:
+			return m.updateHardcover(msg)
 		case searchScreen:
 			return m.updateSearch(msg)
 		case resultsScreen:
@@ -350,6 +359,9 @@ func (m Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		q := strings.TrimSpace(m.input.Value())
 		if q == "" || m.searching {
 			return m, nil
+		}
+		if isHardcoverURL(q) {
+			return m.openHardcover(q, searchScreen)
 		}
 		m.searchSeq++
 		m.searching = true

@@ -3,10 +3,13 @@ package account
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/hardcover"
 	"shelfcheck/internal/libby"
 )
 
@@ -14,10 +17,11 @@ import (
 type Shelf string
 
 const (
-	ShelfRead    Shelf = "read"              // borrowed in the past (print history, Libby 🧾, Libby "Read")
-	ShelfCurrent Shelf = "currently-reading" // checked out now
+	ShelfRead    Shelf = "read"              // borrowed in the past (print history, Libby 🧾, Libby "Read", Hardcover "Read")
+	ShelfCurrent Shelf = "currently-reading" // checked out now, or Hardcover "Currently Reading"
+	ShelfDNF     Shelf = "did-not-finish"    // Hardcover "Did Not Finish" or "Ignored": not for them
 	ShelfHold    Shelf = "on-hold"           // waiting on a hold
-	ShelfWant    Shelf = "to-read"           // Libby "want to read"
+	ShelfWant    Shelf = "to-read"           // Libby or Hardcover "want to read"
 	ShelfSampled Shelf = "sampled"           // Libby 🍰, never borrowed
 )
 
@@ -36,21 +40,29 @@ type Book struct {
 	Genres      []string
 	Subjects    []string
 	Rating      bc.Rating
-	BibID       string // catalog record, if from the library catalog
-	LibbyID     string // Libby title, if from Libby
+	BibID       string  // catalog record, if from the library catalog
+	LibbyID     string  // Libby title, if from Libby
+	HardcoverID int     // Hardcover book, if from Hardcover
+	Stars       float64 // the patron's own rating on Hardcover (0.5-5); 0 if unrated
 }
 
 // Key identifies a work across editions and formats.
 func (b Book) Key() string { return WorkKey(b.Title, firstAuthor(b.Authors)) }
 
-// WorkKey normalizes a title and first author into a comparable key.
+// WorkKey normalizes a title and first author into a comparable key. It
+// keeps the title up to a subtitle or an alternative title ("Babel, or The
+// Necessity of Violence: ..." and "Babel: Or the Necessity..." are both
+// "babel").
 func WorkKey(title, author string) string {
 	t := normTitle(seriesSuffixRe.ReplaceAllString(title, ""))
-	if i := strings.IndexAny(title, ":"); i > 3 {
-		t = normTitle(title[:i])
+	if loc := mainTitleEndRe.FindStringIndex(title); loc != nil && loc[0] > 3 {
+		t = normTitle(title[:loc[0]])
 	}
 	return t + "|" + AuthorKey(author)
 }
+
+// mainTitleEndRe finds where a main title ends: a colon, or ", or" / "; or".
+var mainTitleEndRe = regexp.MustCompile(`(?i):|[,;]\s*or\b`)
 
 func firstAuthor(as []string) string {
 	if len(as) == 0 {
@@ -77,11 +89,12 @@ func (r *Record) Has(title, author string) (Shelf, bool) {
 }
 
 // shelfRank orders shelves so merges keep the strongest signal.
-var shelfRank = map[Shelf]int{ShelfCurrent: 5, ShelfRead: 4, ShelfHold: 3, ShelfWant: 2, ShelfSampled: 1}
+var shelfRank = map[Shelf]int{ShelfCurrent: 6, ShelfDNF: 5, ShelfRead: 4, ShelfHold: 3, ShelfWant: 2, ShelfSampled: 1}
 
 // LoadRecord gathers the reading record from the catalog session (history,
-// checkouts, holds) and Libby (borrowed, Read, want to read, sampled), as far
-// as each is set up. library is the catalog/Libby library key.
+// checkouts, holds), Libby (borrowed, Read, want to read, sampled) and the
+// Hardcover library (with the patron's ratings), as far as each is set up.
+// library is the catalog/Libby library key.
 func (s *Store) LoadRecord(ctx context.Context, client *bc.Client, library string) (*Record, error) {
 	r := &Record{}
 	byKey := map[string]int{}
@@ -113,6 +126,12 @@ func (s *Store) LoadRecord(ctx context.Context, client *bc.Client, library strin
 		fill(&old.SeriesOrder, b.SeriesOrder)
 		fill(&old.BibID, b.BibID)
 		fill(&old.LibbyID, b.LibbyID)
+		if old.HardcoverID == 0 {
+			old.HardcoverID = b.HardcoverID
+		}
+		if old.Stars == 0 {
+			old.Stars = b.Stars
+		}
 		if len(old.Genres) == 0 {
 			old.Genres = b.Genres
 		}
@@ -157,6 +176,12 @@ func (s *Store) LoadRecord(ctx context.Context, client *bc.Client, library strin
 	if s.HasLibby() {
 		if err := s.loadLibby(ctx, library, add); err != nil {
 			r.Notes = append(r.Notes, "libby: "+err.Error())
+		}
+	}
+
+	if hc := s.HardcoverClient(); hc != nil {
+		if err := loadHardcover(ctx, hc, add); err != nil {
+			r.Notes = append(r.Notes, "hardcover: "+err.Error())
 		}
 	}
 	sort.SliceStable(r.Books, func(i, j int) bool { return r.Books[i].Date > r.Books[j].Date })
@@ -227,6 +252,43 @@ func (s *Store) loadLibby(ctx context.Context, library string, add func(Book)) e
 			if b.Format == "book" {
 				b.Format = "ebook"
 			}
+		}
+		add(b)
+	}
+	return nil
+}
+
+// hardcoverShelf maps Hardcover statuses to shelves; Paused counts as read
+// (they've had it in hand) and Ignored as not for them.
+var hardcoverShelf = map[hardcover.Status]Shelf{
+	hardcover.WantToRead: ShelfWant, hardcover.CurrentlyReading: ShelfCurrent, hardcover.Read: ShelfRead,
+	hardcover.Paused: ShelfRead, hardcover.DidNotFinish: ShelfDNF, hardcover.Ignored: ShelfDNF,
+}
+
+func loadHardcover(ctx context.Context, hc *hardcover.Client, add func(Book)) error {
+	lib, err := hc.Library(ctx)
+	if err != nil {
+		return err
+	}
+	for _, ub := range lib {
+		shelf, ok := hardcoverShelf[ub.Status]
+		if !ok {
+			continue
+		}
+		b := Book{Title: ub.Title, Shelf: shelf, HardcoverID: ub.ID, Stars: ub.Rating, Format: "book"}
+		if ub.Author != "" {
+			b.Authors = []string{ub.Author}
+		}
+		if ub.Series != "" && ub.SeriesPos > 0 {
+			b.Series, b.SeriesOrder = ub.Series, strconv.FormatFloat(ub.SeriesPos, 'f', -1, 64)
+		}
+		// Hardcover's date added is often the import date, so it only
+		// dates a wish; a read book's date is its recorded finish, if any.
+		switch shelf {
+		case ShelfWant:
+			b.Date = ub.Added
+		case ShelfRead, ShelfDNF:
+			b.Date = ub.LastRead
 		}
 		add(b)
 	}

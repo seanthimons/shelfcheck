@@ -20,7 +20,9 @@ Writes your reading record as a CSV that Hardcover's importer accepts (its
 Title/Author/Status columns plus Goodreads' columns, so Goodreads-style
 importers work too): library history and Libby borrows as "read",
 current loans as "currently-reading", and holds plus your Libby "want to
-read" tag as "to-read". Sampled-only titles are left out.
+read" tag as "to-read". Sampled-only titles are left out, and so is
+anything already in your Hardcover library when HARDCOVER_TOKEN is set, so
+re-running it exports only what's new.
 `
 
 func exportCmd(args []string) error {
@@ -69,7 +71,12 @@ func exportCmd(args []string) error {
 		"Original Publication Year", "Date Read", "Date Added", "Bookshelves", "Bookshelves with positions",
 		"Exclusive Shelf", "My Review", "Spoiler", "Private Notes", "Read Count", "Owned Copies"})
 	counts := map[account.Shelf]int{}
+	already := 0
 	for _, b := range rec.Books {
+		if b.HardcoverID != 0 {
+			already++
+			continue
+		}
 		shelf := b.Shelf
 		switch shelf {
 		case account.ShelfSampled:
@@ -108,8 +115,12 @@ func exportCmd(args []string) error {
 	if err := w.Error(); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "exported %d read, %d currently reading, %d to read\n",
+	fmt.Fprintf(os.Stderr, "exported %d read, %d currently reading, %d to read",
 		counts[account.ShelfRead], counts[account.ShelfCurrent], counts[account.ShelfWant])
+	if already > 0 {
+		fmt.Fprintf(os.Stderr, " (%d already on Hardcover left out)", already)
+	}
+	fmt.Fprintln(os.Stderr)
 	return nil
 }
 
@@ -118,6 +129,7 @@ var hardcoverStatus = map[account.Shelf]string{
 	account.ShelfRead:    "Read",
 	account.ShelfCurrent: "Currently Reading",
 	account.ShelfWant:    "Want to Read",
+	account.ShelfDNF:     "Did Not Finish",
 }
 
 // firstLast turns "Wells, Martha" into "Martha Wells".
