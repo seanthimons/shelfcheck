@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"math"
 	"net/url"
 	"regexp"
 	"sort"
@@ -20,6 +21,9 @@ func (c *Client) Search(ctx context.Context, q Query, page int) (*SearchResult, 
 	text := strings.TrimSpace(q.Text)
 	if text == "" {
 		return nil, errors.New("bibliocommons: empty search query")
+	}
+	if q.Sort == SortTopRated {
+		return c.searchTopRated(ctx, q)
 	}
 	typ := q.Type
 	if typ == "" {
@@ -65,6 +69,62 @@ func (c *Client) Search(ctx context.Context, q Query, page int) (*SearchResult, 
 		}
 	}
 	return res, nil
+}
+
+const (
+	topRatedExact    = 50 // the top this many are guaranteed correctly ranked
+	topRatedMaxPages = 10
+)
+
+// searchTopRated pages through the gateway's raw-average sort and re-ranks
+// by Rating.Weighted. A title's weighted score always lies between its raw
+// average and ratingPrior, so once both the last raw average seen and the
+// prior fall below the topRatedExact-th best weighted score, no later title
+// can make the cut and paging stops.
+func (c *Client) searchTopRated(ctx context.Context, q Query) (*SearchResult, error) {
+	raw := q.Clone()
+	raw.Sort = SortRating
+	var out *SearchResult
+	var bibs []Bib
+	for page := 1; page <= topRatedMaxPages; page++ {
+		res, err := c.Search(ctx, raw, page)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			out = res
+		}
+		bibs = append(bibs, res.Bibs...)
+		if page >= res.Pages || len(res.Bibs) == 0 {
+			break
+		}
+		last := res.Bibs[len(res.Bibs)-1].Rating
+		if last.Count == 0 {
+			break // into the unrated titles
+		}
+		if s, ok := kthWeighted(bibs, topRatedExact); ok && math.Max(float64(last.Average), ratingPrior) < s {
+			break
+		}
+	}
+	sort.SliceStable(bibs, func(i, j int) bool {
+		return bibs[i].Rating.Weighted() > bibs[j].Rating.Weighted()
+	})
+	out.Query, out.Bibs, out.Page, out.Pages = q, bibs, 1, 1
+	out.Partial = len(bibs) < out.Total
+	return out, nil
+}
+
+// kthWeighted returns the k-th highest weighted rating among bibs.
+func kthWeighted(bibs []Bib, k int) (float64, bool) {
+	if len(bibs) < k {
+		return 0, false
+	}
+	ws := make([]float64, len(bibs))
+	for i, b := range bibs {
+		ws[i] = b.Rating.Weighted()
+	}
+	sort.Sort(sort.Reverse(sort.Float64Slice(ws)))
+	return ws[k-1], true
 }
 
 // Availability returns per-copy availability for a bib ID from search results.

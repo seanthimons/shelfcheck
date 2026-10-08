@@ -39,11 +39,11 @@ var categories = []category{
 	{"", "Sort"},
 }
 
-var sortOptions = []string{bc.SortRelevance, bc.SortRating, bc.SortPublished, bc.SortNewlyAcquired, bc.SortTitle, bc.SortAuthor}
+var sortOptions = []string{bc.SortRelevance, bc.SortTopRated, bc.SortPublished, bc.SortNewlyAcquired, bc.SortTitle, bc.SortAuthor}
 
 var sortLabels = map[string]string{
 	bc.SortRelevance:     "Relevance",
-	bc.SortRating:        "Top rated",
+	bc.SortTopRated:      "Top rated",
 	bc.SortPublished:     "Newest published",
 	bc.SortNewlyAcquired: "Recently added",
 	bc.SortTitle:         "Title",
@@ -293,7 +293,7 @@ func (m Model) toggleHome() (tea.Model, tea.Cmd) {
 
 // cycleSort steps through the most useful sort orders.
 func (m Model) cycleSort() (tea.Model, tea.Cmd) {
-	order := []string{bc.SortRelevance, bc.SortRating, bc.SortPublished, bc.SortNewlyAcquired}
+	order := []string{bc.SortRelevance, bc.SortTopRated, bc.SortPublished, bc.SortNewlyAcquired}
 	next := bc.SortRelevance
 	for i, s := range order {
 		if s == m.q.Sort {

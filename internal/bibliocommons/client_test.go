@@ -2,11 +2,13 @@ package bibliocommons
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -160,6 +162,68 @@ func TestQueryToggleClone(t *testing.T) {
 	c.Toggle(FacetFormat, "EBOOK")
 	if c.Narrowed() {
 		t.Errorf("empty field not removed: %v", c.Filters)
+	}
+}
+
+func TestWeightedRating(t *testing.T) {
+	one := Rating{Average: 100, Count: 1}
+	many := Rating{Average: 89, Count: 211}
+	some := Rating{Average: 90, Count: 24}
+	if !(many.Weighted() > some.Weighted() && some.Weighted() > one.Weighted()) {
+		t.Errorf("weighted: 211x89=%.1f 24x90=%.1f 1x100=%.1f", many.Weighted(), some.Weighted(), one.Weighted())
+	}
+	if (Rating{}).Weighted() != 0 {
+		t.Error("unrated should score 0")
+	}
+}
+
+// TestTopRated serves three pages in raw-average order and checks the
+// re-ranking and early stop.
+func TestTopRated(t *testing.T) {
+	pages := [][]struct{ avg, n int }{
+		{{100, 1}, {100, 2}, {95, 300}},
+		{{90, 1}, {89, 211}, {88, 5}},
+		{{70, 50}, {60, 3}, {50, 1}},
+	}
+	var requested []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Query().Get("page"))
+		if r.URL.Query().Get("sort") != SortRating {
+			t.Errorf("sort = %q", r.URL.Query().Get("sort"))
+		}
+		p, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		p = max(p, 1)
+		var results, bibs []string
+		for i, b := range pages[p-1] {
+			id := fmt.Sprintf("p%d-%d", p, i)
+			results = append(results, fmt.Sprintf(`{"representative":%q}`, id))
+			bibs = append(bibs, fmt.Sprintf(`%q:{"id":%q,"briefInfo":{"title":%q,"rating":{"averageRating":%d,"totalCount":%d}}}`, id, id, id, b.avg, b.n))
+		}
+		fmt.Fprintf(w, `{"catalogSearch":{"pagination":{"count":9,"page":%d,"pages":3},"results":[%s]},"entities":{"bibs":{%s}}}`,
+			p, strings.Join(results, ","), strings.Join(bibs, ","))
+	}))
+	t.Cleanup(srv.Close)
+	c := New("testlib")
+	c.BaseURL = srv.URL
+
+	res, err := c.Search(context.Background(), Query{Text: "x", Sort: SortTopRated}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, b := range res.Bibs {
+		order = append(order, b.ID)
+	}
+	// 95x300 and 89x211 lead; the single 100 and 90 ratings sink.
+	if order[0] != "p1-2" || order[1] != "p2-1" {
+		t.Errorf("order = %v", order)
+	}
+	if res.Pages != 1 || res.Total != 9 || res.Query.Sort != SortTopRated {
+		t.Errorf("res = pages %d total %d sort %q", res.Pages, res.Total, res.Query.Sort)
+	}
+	// Fewer than topRatedExact titles exist, so every page is read.
+	if len(requested) != 3 {
+		t.Errorf("requested pages %v", requested)
 	}
 }
 
@@ -352,6 +416,14 @@ func TestLive(t *testing.T) {
 		if res.Total == 0 || res.Total >= all.Total {
 			t.Errorf("%s filter didn't narrow results: %d -> %d", f.field, all.Total, res.Total)
 		}
+	}
+	top, err := c.Search(ctx, Query{Text: "space operas", Type: Subject, Sort: SortTopRated}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("top rated space operas: %d of %d ranked", len(top.Bibs), top.Total)
+	for _, b := range top.Bibs[:min(5, len(top.Bibs))] {
+		t.Logf("    %.1f★ (%d) weighted %.1f  %s", b.Rating.Stars(), b.Rating.Count, b.Rating.Weighted(), b.Title)
 	}
 	for _, s := range []string{SortRating, SortPublished, SortNewlyAcquired, SortTitle, SortAuthor} {
 		res, err := c.Search(ctx, Query{Text: "tchaikovsky", Sort: s}, 1)

@@ -36,6 +36,25 @@ type Rating struct {
 // Stars returns the average on a 0-5 scale.
 func (r Rating) Stars() float64 { return float64(r.Average) / 20 }
 
+// Weighting for Rating.Weighted: every title is scored as if it also had
+// ratingWeight ratings of ratingPrior (3.75 stars), so a handful of ratings
+// can't outrank a long track record.
+const (
+	ratingPrior  = 75.0
+	ratingWeight = 10.0
+)
+
+// Weighted returns a Bayesian-average score (0-100) that pulls titles with
+// few ratings toward a typical rating: one 5-star rating scores about 77,
+// while 4.45 stars from 211 ratings scores about 88. Unrated titles score 0.
+func (r Rating) Weighted() float64 {
+	if r.Count == 0 {
+		return 0
+	}
+	n := float64(r.Count)
+	return (ratingPrior*ratingWeight + float64(r.Average)*n) / (ratingWeight + n)
+}
+
 // Summary is the system-wide availability rollup for a Bib.
 type Summary struct {
 	Status         string // "AVAILABLE", "UNAVAILABLE", "ON_ORDER", ...
@@ -83,8 +102,13 @@ const (
 )
 
 const (
-	SortRelevance     = ""
-	SortRating        = "ugc_rating"
+	SortRelevance = ""
+	// SortTopRated ranks by Rating.Weighted. The gateway can't do this, so
+	// the client fetches the best raw averages and re-ranks them; results
+	// come back as a single page.
+	SortTopRated = "top_rated"
+	SortRating   = "ugc_rating" // the gateway's raw average; 1 five-star rating ranks first
+
 	SortPublished     = "published_date"
 	SortNewlyAcquired = "newly_acquired"
 	SortTitle         = "title"
@@ -139,6 +163,9 @@ type SearchResult struct {
 	Total  int
 	Bibs   []Bib
 	Facets map[string][]Facet // by facet field; each lists its most common values
+	// Partial is set when Bibs holds only the best-ranked part of Total
+	// (see SortTopRated).
+	Partial bool
 }
 
 // Facet is one value of a search refinement and how many results have it.

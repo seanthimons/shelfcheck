@@ -134,6 +134,9 @@ func (m Model) viewResults() string {
 	if m.q.Type != "" && m.q.Type != bc.Keyword {
 		head += dimStyle.Render(" (" + string(m.q.Type) + ")")
 	}
+	if m.partial {
+		head += dimStyle.Render(fmt.Sprintf(" · showing the top %d", len(m.results)))
+	}
 	filters := m.filterSummary(m.q)
 	if len(m.results) == 0 {
 		msg := "\n  No results for " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text))
@@ -144,7 +147,7 @@ func (m Model) viewResults() string {
 	}
 
 	// Columns: marker, title, author, format, year, rating, availability, home.
-	const formatW, yearW, ratingW, availW, homeW = 12, 4, 4, 15, 6
+	const formatW, yearW, ratingW, availW, homeW = 12, 4, 11, 15, 6
 	authorW := 22
 	if m.width < 100 {
 		authorW = 0
@@ -475,7 +478,15 @@ func ratingShort(r bc.Rating) string {
 	if r.Count == 0 {
 		return ""
 	}
-	return starStyle.Render("★") + fmt.Sprintf("%.1f", r.Stars())
+	return starStyle.Render("★") + fmt.Sprintf("%.1f", r.Stars()) + dimStyle.Render(fmt.Sprintf(" (%s)", compact(r.Count)))
+}
+
+// compact shortens large counts: 1234 -> "1.2k".
+func compact(n int) string {
+	if n < 1000 {
+		return fmt.Sprint(n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 // stars renders a 0-5 rating rounded to the nearest whole star.

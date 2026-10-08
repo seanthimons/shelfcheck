@@ -44,6 +44,7 @@ type Model struct {
 	results     []bc.Bib
 	facets      map[string][]bc.Facet // refinements for the current search
 	total       int
+	partial     bool // results are the best-ranked slice of total
 	page, pages int
 	cursor      int
 	offset      int // first visible result row
@@ -240,6 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Blur()
 		}
 		m.total, m.page, m.pages = msg.res.Total, msg.res.Page, msg.res.Pages
+		m.partial = msg.res.Partial
 		return m, m.prefetchVisible()
 
 	case availMsg:

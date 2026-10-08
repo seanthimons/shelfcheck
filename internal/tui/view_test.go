@@ -28,7 +28,7 @@ func TestPlural(t *testing.T) {
 
 func TestFilterSummary(t *testing.T) {
 	m := Model{home: "1", branches: map[string]string{"1": "Downtown Main Library"}}
-	q := bc.Query{Text: "x", Sort: bc.SortRating}
+	q := bc.Query{Text: "x", Sort: bc.SortTopRated}
 	q.Toggle(bc.FacetFormat, "BK")
 	q.Toggle(bc.FacetStatus, "1")
 	q.Toggle(bc.FacetRating, "FOUR_PLUS_STARS")
