@@ -127,6 +127,30 @@ func kthWeighted(bibs []Bib, k int) (float64, bool) {
 	return ws[k-1], true
 }
 
+// Bibs looks up records by ID, in the order given. IDs the gateway doesn't
+// return are skipped; an unknown ID can fail the whole request.
+func (c *Client) Bibs(ctx context.Context, ids ...string) ([]Bib, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var raw struct {
+		Entities struct {
+			Bibs map[string]rawBib `json:"bibs"`
+		} `json:"entities"`
+	}
+	params := url.Values{"metadataIds": {strings.Join(ids, ",")}}
+	if err := c.getJSON(ctx, "bibs", params, searchTTL, &raw); err != nil {
+		return nil, err
+	}
+	var out []Bib
+	for _, id := range ids {
+		if b, ok := raw.Entities.Bibs[id]; ok {
+			out = append(out, b.toBib())
+		}
+	}
+	return out, nil
+}
+
 // Availability returns per-copy availability for a bib ID from search results.
 func (c *Client) Availability(ctx context.Context, bibID string) (*Availability, error) {
 	var raw rawAvailability

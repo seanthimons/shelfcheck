@@ -3,6 +3,7 @@
 //	shelfcheck                  open the search screen
 //	shelfcheck alien clay       search right away
 //	shelfcheck serve            serve the same UI over SSH (see serve.go)
+//	shelfcheck json ...         JSON output for scripts and agents (see json.go)
 package main
 
 import (
@@ -25,18 +26,31 @@ type options struct {
 }
 
 func (o *options) register(fs *flag.FlagSet) {
-	fs.StringVar(&o.library, "library", "cincinnatilibrary", "BiblioCommons library (subdomain of its bibliocommons.com catalog)")
-	fs.StringVar(&o.home, "home", "1", "home branch code, listed first (1 = Main Library)")
+	o.registerCatalog(fs)
 	fs.BoolVar(&o.anywhere, "anywhere", false, "start searches across all branches instead of only what's on the shelf at -home")
 }
 
+func (o *options) registerCatalog(fs *flag.FlagSet) {
+	fs.StringVar(&o.library, "library", "cincinnatilibrary", "BiblioCommons library (subdomain of its bibliocommons.com catalog)")
+	fs.StringVar(&o.home, "home", "1", "home branch code (1 = Main Library)")
+}
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "serve" {
-		if err := serve(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "shelfcheck serve:", err)
-			os.Exit(1)
+	if len(os.Args) > 1 {
+		var run func([]string) error
+		switch os.Args[1] {
+		case "serve":
+			run = serve
+		case "json":
+			run = jsonCmd
 		}
-		return
+		if run != nil {
+			if err := run(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "shelfcheck %s: %v\n", os.Args[1], err)
+				os.Exit(1)
+			}
+			return
+		}
 	}
 
 	var o options

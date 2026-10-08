@@ -464,4 +464,12 @@ func TestLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("%d locations", len(locs))
+
+	bibs, err := c.Bibs(ctx, "S980C10216670", "S170C3895239")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bibs) != 2 || bibs[0].ID != "S980C10216670" || bibs[1].Title != "Alien Clay" {
+		t.Errorf("Bibs = %+v", bibs)
+	}
 }
