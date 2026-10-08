@@ -29,7 +29,7 @@ commands:
   checkouts                   your current loans, incl. Libby/OverDrive (needs shelfcheck login)
   holds                       your holds, incl. Libby/OverDrive        (needs shelfcheck login)
   libby                       your Libby tags: borrowed, sampled, wishlists (needs shelfcheck libby link)
-  wishlist                    which "want to read" titles are on the shelf at -home now (needs libby link)
+  wishlist                    which "want to read" titles you can get now: print on the shelf at -home, or ebooks (needs libby link)
 
 Run "shelfcheck json <command> -h" for a command's flags.
 `
@@ -582,11 +582,16 @@ func jsonLibby(ctx context.Context, args []string) error {
 // --- wishlist ---------------------------------------------------------------
 
 type wishOut struct {
-	Title   string    `json:"title"`
-	Author  string    `json:"author,omitempty"`
-	Tagged  string    `json:"tagged,omitempty"`
-	OnShelf bool      `json:"on_shelf_at_home"`
-	Matches []bookOut `json:"matches,omitempty"`
+	Title     string         `json:"title"`
+	Author    string         `json:"author,omitempty"`
+	Tagged    string         `json:"tagged,omitempty"`
+	Available bool           `json:"available_now"`
+	Matches   []wishMatchOut `json:"matches,omitempty"`
+}
+
+type wishMatchOut struct {
+	bookOut
+	AvailableAt string `json:"available_at"` // the home branch's name, or "online"
 }
 
 var (
@@ -632,20 +637,32 @@ func sameTitle(catalog, libbyTitle string) bool {
 	return c != "" && (c == l || strings.HasPrefix(l, c+" "))
 }
 
+var digitalFormats = map[string]bool{"EBOOK": true, "EAUDIOBOOK": true, "AB_ONLINE": true, "EMAG": true}
+
 func jsonWishlist(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json wishlist", flag.ContinueOnError)
 	var o options
 	o.registerCatalog(fs)
 	tagName := fs.String("tag", "want to read", "Libby tag to check")
 	var formats listFlag
-	fs.Var(&formats, "format", "catalog formats to accept (default book, large-print)")
+	fs.Var(&formats, "format", "catalog formats to accept (default book, ebook); print must be on the shelf at -home, digital available to borrow now")
 	all := fs.Bool("all", false, "list every title, not just the ones on the shelf")
 	lang := fs.String("lang", "eng", `catalog language code to accept ("" for any)`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if len(formats) == 0 {
-		formats = listFlag{"book", "large-print"}
+		formats = listFlag{"book", "ebook"}
+	}
+	var codes []string
+	digital := false
+	for _, f := range formats {
+		code, ok := formatAliases[strings.ToLower(f)]
+		if !ok {
+			code = strings.ToUpper(f)
+		}
+		codes = append(codes, code)
+		digital = digital || digitalFormats[code]
 	}
 	saved, err := libby.Load(libbyPath())
 	if err != nil {
@@ -671,6 +688,12 @@ func jsonWishlist(ctx context.Context, args []string) error {
 	}
 
 	client := bc.New(o.library)
+	branches := map[string]string{o.home: "branch " + o.home}
+	if locs, err := client.Locations(ctx); err == nil {
+		for _, l := range locs {
+			branches[l.Code] = l.Name
+		}
+	}
 	out := []wishOut{}
 	for _, it := range items {
 		if it.Format != "" && it.Format != "book" {
@@ -681,15 +704,16 @@ func jsonWishlist(ctx context.Context, args []string) error {
 			w.Tagged = it.Tagged.Format("2006-01-02")
 		}
 		q := bc.Query{Text: wishQuery(it.Title), Type: bc.Title}
+		// STATUS values are ORed: on the shelf at home, or (for digital
+		// formats) available online now.
 		q.Toggle(bc.FacetStatus, o.home)
+		if digital {
+			q.Toggle(bc.FacetStatus, "_online_")
+		}
 		if *lang != "" {
 			q.Toggle(bc.FacetLanguage, *lang)
 		}
-		for _, f := range formats {
-			code, ok := formatAliases[strings.ToLower(f)]
-			if !ok {
-				code = strings.ToUpper(f)
-			}
+		for _, code := range codes {
 			q.Toggle(bc.FacetFormat, code)
 		}
 		res, err := client.Search(ctx, q, 1)
@@ -705,13 +729,17 @@ func jsonWishlist(ctx context.Context, args []string) error {
 				if want != "" && authorKey(a) == want {
 					bo := newBookOut(o.library, b)
 					bo.Description, bo.Subjects, bo.ISBNs = "", nil, nil
-					w.Matches = append(w.Matches, bo)
+					at := branches[o.home]
+					if b.Digital || digitalFormats[b.Format] {
+						at = "online"
+					}
+					w.Matches = append(w.Matches, wishMatchOut{bookOut: bo, AvailableAt: at})
 					break
 				}
 			}
 		}
-		w.OnShelf = len(w.Matches) > 0
-		if w.OnShelf || *all {
+		w.Available = len(w.Matches) > 0
+		if w.Available || *all {
 			out = append(out, w)
 		}
 	}
