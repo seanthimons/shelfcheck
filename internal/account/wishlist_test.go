@@ -13,7 +13,8 @@ func TestWishlistMatching(t *testing.T) {
 			t.Errorf("wishQuery(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if AuthorKey("Shirtaloon; Deverell, Travis") != "shirtaloon" || AuthorKey("Tchaikovsky, Adrian") != "tchaikovsky" {
+	if AuthorKey("Shirtaloon; Deverell, Travis") != "shirtaloon" || AuthorKey("Tchaikovsky, Adrian") != "tchaikovsky" ||
+		AuthorKey("James S. A. Corey") != AuthorKey("Corey, James S. A.") {
 		t.Error("authorKey")
 	}
 	for _, c := range []struct {
@@ -33,5 +34,25 @@ func TestWishlistMatching(t *testing.T) {
 		if got := SameTitle(c.catalog, c.libby); got != c.want {
 			t.Errorf("SameTitle(%q, %q) = %v, want %v", c.catalog, c.libby, got, c.want)
 		}
+	}
+}
+
+func TestSplitSeries(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"Murderbot diaries, bk. 2":  {"Murderbot diaries", "2"},
+		"Murderbot diaries, book 5": {"Murderbot diaries", "5"},
+		"Expanse, bk. 9":            {"Expanse", "9"},
+		"Daevabad trilogy ; 3":      {"Daevabad trilogy ; 3", ""},
+		"Hierarchy":                 {"Hierarchy", ""},
+	} {
+		if n, o := SplitSeries(in); n != want[0] || o != want[1] {
+			t.Errorf("SplitSeries(%q) = %q, %q; want %q", in, n, o, want)
+		}
+	}
+	if WorkKey("The Incandescent: A School Story", "Tesh, Emily") != WorkKey("Incandescent", "Tesh, Emily") {
+		t.Error("WorkKey should ignore subtitles and leading articles")
+	}
+	if WorkKey("He Who Fights with Monsters, 1", "Shirtaloon") != WorkKey("He Who Fights with Monsters", "Shirtaloon; Deverell, Travis") {
+		t.Error("WorkKey should ignore series numbers and co-authors")
 	}
 }

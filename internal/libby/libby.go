@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -293,4 +294,106 @@ func Load(path string) (Saved, error) {
 	}
 	err = json.Unmarshal(b, &s)
 	return s, err
+}
+
+// --- catalog media (thunder) --------------------------------------------------
+
+// Media is a Libby/OverDrive catalog record.
+type Media struct {
+	ID          string
+	Title       string
+	Subtitle    string
+	Authors     []string
+	Type        string // "ebook", "audiobook", "magazine"
+	Series      string
+	SeriesOrder string // reading order within Series, e.g. "8"; may be empty
+	Subjects    []string
+	ISBN        string
+	PublishYear string
+	Publisher   string
+	Available   bool
+	Copies      int
+	Holds       int
+}
+
+const mediaBatch = 25
+
+// Media looks up titles in a library's Libby collection (by the library's
+// advantage key, e.g. "cincinnatilibrary"), in batches. It needs no login.
+func (c *Client) Media(ctx context.Context, library string, ids []string) (map[string]Media, error) {
+	out := map[string]Media{}
+	for start := 0; start < len(ids); start += mediaBatch {
+		batch := ids[start:min(start+mediaBatch, len(ids))]
+		u := fmt.Sprintf("%s/v2/libraries/%s/media/bulk?%s", c.Thunder, url.PathEscape(library),
+			url.Values{"titleIds": {strings.Join(batch, ",")}, "x-client-id": {"dewey"}}.Encode())
+		var raw struct {
+			Items []struct {
+				ID       string `json:"id"`
+				Title    string `json:"title"`
+				Subtitle string `json:"subtitle"`
+				Type     struct {
+					ID string `json:"id"`
+				} `json:"type"`
+				Creators []struct {
+					Name string `json:"name"`
+					Role string `json:"role"`
+				} `json:"creators"`
+				Series         string `json:"series"`
+				DetailedSeries struct {
+					ReadingOrder string `json:"readingOrder"`
+				} `json:"detailedSeries"`
+				Subjects []struct {
+					Name string `json:"name"`
+				} `json:"subjects"`
+				Formats []struct {
+					Identifiers []struct {
+						Type  string `json:"type"`
+						Value string `json:"value"`
+					} `json:"identifiers"`
+				} `json:"formats"`
+				PublishDate string `json:"publishDate"`
+				Publisher   struct {
+					Name string `json:"name"`
+				} `json:"publisher"`
+				IsAvailable bool `json:"isAvailable"`
+				OwnedCopies int  `json:"ownedCopies"`
+				HoldsCount  int  `json:"holdsCount"`
+			} `json:"items"`
+		}
+		if err := c.do(ctx, http.MethodGet, u, nil, &raw); err != nil {
+			return out, err
+		}
+		for _, it := range raw.Items {
+			m := Media{
+				ID: it.ID, Title: it.Title, Subtitle: it.Subtitle, Type: it.Type.ID,
+				Series: it.Series, SeriesOrder: it.DetailedSeries.ReadingOrder,
+				Publisher: it.Publisher.Name, Available: it.IsAvailable, Copies: it.OwnedCopies, Holds: it.HoldsCount,
+			}
+			for _, cr := range it.Creators {
+				if cr.Role == "Author" || cr.Role == "" {
+					m.Authors = append(m.Authors, cr.Name)
+				}
+			}
+			for _, s := range it.Subjects {
+				m.Subjects = append(m.Subjects, s.Name)
+			}
+		isbn:
+			for _, f := range it.Formats {
+				for _, id := range f.Identifiers {
+					if id.Type == "ISBN" && id.Value != "" {
+						m.ISBN = id.Value
+						break isbn
+					}
+				}
+			}
+			if len(it.PublishDate) >= 4 {
+				m.PublishYear = it.PublishDate[:4]
+			}
+			out[it.ID] = m
+		}
+		if start+mediaBatch < len(ids) {
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
+	return out, nil
 }

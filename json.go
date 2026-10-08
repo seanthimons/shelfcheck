@@ -14,6 +14,7 @@ import (
 	"shelfcheck/internal/account"
 	bc "shelfcheck/internal/bibliocommons"
 	"shelfcheck/internal/libby"
+	"shelfcheck/internal/recommend"
 )
 
 const jsonUsage = `usage: shelfcheck json <command> [flags] [args]
@@ -29,6 +30,7 @@ commands:
   checkouts                   your current loans, incl. Libby/OverDrive (needs shelfcheck login)
   holds                       your holds, incl. Libby/OverDrive        (needs shelfcheck login)
   libby                       your Libby tags: borrowed, sampled, wishlists (needs shelfcheck libby link)
+  recommend                   picks you can get now, from your reading record (needs login and/or libby link)
   wishlist                    which "want to read" titles you can get now: print on the shelf at -home, or ebooks (needs libby link)
 
 Run "shelfcheck json <command> -h" for a command's flags.
@@ -55,6 +57,8 @@ func jsonCmd(args []string) error {
 		err = jsonLibby(ctx, args[1:])
 	case "wishlist":
 		err = jsonWishlist(ctx, args[1:])
+	case "recommend":
+		err = jsonRecommend(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], jsonUsage)
 	}
@@ -647,6 +651,110 @@ func jsonWishlist(ctx context.Context, args []string) error {
 		if wo.Available || *all {
 			out = append(out, wo)
 		}
+	}
+	return writeJSON(out)
+}
+
+// --- recommend --------------------------------------------------------------
+
+type pickOut struct {
+	bookOut
+	OnShelfAtHome bool     `json:"on_shelf_at_home"`
+	EbookNow      bool     `json:"ebook_now"`
+	Score         float64  `json:"score"`
+	Why           []string `json:"why"`
+}
+
+type profileOut struct {
+	UpNext    []string `json:"up_next_not_available,omitempty"`
+	BooksRead int      `json:"books_read"`
+	Series    []string `json:"active_series"`
+	Authors   []string `json:"top_authors"`
+	Genres    []string `json:"top_genres"`
+}
+
+func jsonRecommend(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("json recommend", flag.ContinueOnError)
+	var o options
+	o.registerCatalog(fs)
+	limit := fs.Int("limit", 20, "number of picks")
+	withWish := fs.Bool("wishlist", false, "also check your Libby want-to-read list (~25s more)")
+	verbose := fs.Bool("v", false, "print progress to stderr")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	client := bc.New(o.library)
+	st := account.DefaultStore(configDir())
+	rec, err := st.LoadRecord(ctx, client, o.library)
+	if err != nil {
+		return err
+	}
+	for _, n := range rec.Notes {
+		fmt.Fprintln(os.Stderr, "shelfcheck: warning:", n)
+	}
+	opts := recommend.Options{Home: o.home, Language: "eng", Limit: *limit, Hardcover: st.HardcoverClient()}
+	if locs, err := client.Locations(ctx); err == nil {
+		for _, l := range locs {
+			if l.Code == o.home {
+				opts.HomeName = l.Name
+			}
+		}
+	}
+	if *withWish && st.HasLibby() {
+		lc, err := st.LibbyClient()
+		if err != nil {
+			return err
+		}
+		titles, err := account.WishlistTitles(ctx, lc, "want to read")
+		if err != nil {
+			return err
+		}
+		for _, t := range titles {
+			w, err := account.CheckWish(ctx, client, t, account.WishOptions{Home: o.home, HomeName: opts.HomeName, Language: "eng"})
+			if err == nil && w.Available() {
+				opts.Wishlist = append(opts.Wishlist, w)
+			}
+		}
+	}
+	if *verbose {
+		opts.Debug = func(f string, a ...any) { fmt.Fprintf(os.Stderr, "  "+f+"\n", a...) }
+	}
+	progress := func(stage string, picks []recommend.Pick) {
+		if *verbose {
+			fmt.Fprintf(os.Stderr, "%s (%d picks so far)\n", stage, len(picks))
+		}
+	}
+	picks, prof, err := recommend.Recommend(ctx, client, rec, opts, progress)
+	if err != nil {
+		return err
+	}
+	out := struct {
+		Profile profileOut `json:"profile"`
+		Picks   []pickOut  `json:"picks"`
+	}{Picks: []pickOut{}}
+	out.Profile.BooksRead = prof.Read
+	for _, u := range prof.UpNext {
+		out.Profile.UpNext = append(out.Profile.UpNext, fmt.Sprintf("%s #%v: %s by %s", u.Series, u.Position, u.Title, u.Author))
+	}
+	for i, s := range prof.Series {
+		if i < 8 {
+			out.Profile.Series = append(out.Profile.Series, fmt.Sprintf("%s (read %d, up to #%v)", s.Name, s.Count, s.MaxOrder))
+		}
+	}
+	for i, a := range prof.Authors {
+		if i < 8 {
+			out.Profile.Authors = append(out.Profile.Authors, fmt.Sprintf("%s (%d)", a.Name, a.Count))
+		}
+	}
+	for i, g := range prof.Genres {
+		if i < 8 {
+			out.Profile.Genres = append(out.Profile.Genres, g.Name)
+		}
+	}
+	for _, p := range picks {
+		bo := newBookOut(o.library, p.Bib)
+		bo.Subjects, bo.ISBNs = nil, nil
+		out.Picks = append(out.Picks, pickOut{bookOut: bo, OnShelfAtHome: p.Print, EbookNow: p.Ebook, Score: round1(p.Score), Why: p.Reasons})
 	}
 	return writeJSON(out)
 }

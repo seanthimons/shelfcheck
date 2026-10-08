@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/hardcover"
 	"shelfcheck/internal/libby"
 )
 
@@ -66,25 +67,36 @@ func (s *Store) HasLibby() bool {
 	return err == nil
 }
 
-// CredentialsFromEnv reads the card number and PIN from the environment or
-// the credentials file. It refuses a file other users can read.
-func (s *Store) CredentialsFromEnv() (card, pin string, err error) {
-	card, pin = os.Getenv("SHELFCHECK_CARD"), os.Getenv("SHELFCHECK_PIN")
-	if card != "" && pin != "" {
-		return card, pin, nil
+// HardcoverClient returns a Hardcover API client using HARDCOVER_TOKEN from
+// the environment or the credentials file, or nil if there's no token.
+func (s *Store) HardcoverClient() *hardcover.Client {
+	tok := os.Getenv("HARDCOVER_TOKEN")
+	if tok == "" {
+		vals, _ := s.envFile()
+		tok = vals["HARDCOVER_TOKEN"]
 	}
+	if tok == "" {
+		return nil
+	}
+	return hardcover.New(tok)
+}
+
+// envFile reads KEY=value lines from the credentials file, refusing a file
+// other users can read.
+func (s *Store) envFile() (map[string]string, error) {
 	fi, err := os.Stat(s.Credentials)
 	if err != nil {
-		return "", "", fmt.Errorf("no credentials: set SHELFCHECK_CARD and SHELFCHECK_PIN in %s", s.Credentials)
+		return nil, err
 	}
 	if fi.Mode().Perm()&0o077 != 0 {
-		return "", "", fmt.Errorf("%s is readable by other users; run: chmod 600 %s", s.Credentials, s.Credentials)
+		return nil, fmt.Errorf("%s is readable by other users; run: chmod 600 %s", s.Credentials, s.Credentials)
 	}
 	f, err := os.Open(s.Credentials)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	defer f.Close()
+	vals := map[string]string{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -95,22 +107,35 @@ func (s *Store) CredentialsFromEnv() (card, pin string, err error) {
 		if !ok {
 			continue
 		}
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
-		switch strings.TrimSpace(strings.TrimPrefix(k, "export ")) {
-		case "SHELFCHECK_CARD":
-			if card == "" {
-				card = v
-			}
-		case "SHELFCHECK_PIN":
-			if pin == "" {
-				pin = v
-			}
-		}
+		vals[strings.TrimSpace(strings.TrimPrefix(k, "export "))] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	return vals, sc.Err()
+}
+
+// CredentialsFromEnv reads the card number and PIN from the environment or
+// the credentials file. It refuses a file other users can read.
+func (s *Store) CredentialsFromEnv() (card, pin string, err error) {
+	card, pin = os.Getenv("SHELFCHECK_CARD"), os.Getenv("SHELFCHECK_PIN")
+	if card != "" && pin != "" {
+		return card, pin, nil
+	}
+	vals, err := s.envFile()
+	if os.IsNotExist(err) {
+		return "", "", fmt.Errorf("no credentials: set SHELFCHECK_CARD and SHELFCHECK_PIN in %s", s.Credentials)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if card == "" {
+		card = vals["SHELFCHECK_CARD"]
+	}
+	if pin == "" {
+		pin = vals["SHELFCHECK_PIN"]
 	}
 	if card == "" || pin == "" {
 		return "", "", fmt.Errorf("fill in SHELFCHECK_CARD and SHELFCHECK_PIN in %s", s.Credentials)
 	}
-	return card, pin, sc.Err()
+	return card, pin, nil
 }
 
 // Login signs in with the saved credentials and saves the session.

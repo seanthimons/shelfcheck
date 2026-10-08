@@ -49,6 +49,8 @@ func main() {
 			run = loginCmd
 		case "libby":
 			run = libbyCmd
+		case "export":
+			run = exportCmd
 		}
 		if run != nil {
 			if err := run(os.Args[2:]); err != nil {

@@ -14,6 +14,7 @@ import (
 	"shelfcheck/internal/account"
 	bc "shelfcheck/internal/bibliocommons"
 	"shelfcheck/internal/libby"
+	"shelfcheck/internal/recommend"
 )
 
 type screen int
@@ -24,6 +25,7 @@ const (
 	detailScreen
 	accountScreen
 	wishlistScreen
+	forYouScreen
 )
 
 var searchTypes = []bc.SearchType{bc.Keyword, bc.Title, bc.Author, bc.Subject, bc.Genre, bc.Series}
@@ -93,9 +95,19 @@ type Model struct {
 	wishFailed  int
 	wishAll     bool
 	wishCursor  int
-	vp          viewport.Model
-	spin        spinner.Model
-	err         error
+
+	// "For you" screen; see foryou.go.
+	recSeq     int
+	recLoading bool
+	recDone    bool
+	recStage   string
+	recErr     error
+	recPicks   []recommend.Pick
+	recProfile recommend.Profile
+	recCursor  int
+	vp         viewport.Model
+	spin       spinner.Model
+	err        error
 }
 
 type (
@@ -298,6 +310,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case wishTitlesMsg, wishCheckedMsg:
 		return m.handleWishMsg(msg)
 
+	case recProgressMsg, recDoneMsg:
+		return m.handleRecMsg(msg)
+
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -310,6 +325,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateAccount(msg)
 		case wishlistScreen:
 			return m.updateWishlist(msg)
+		case forYouScreen:
+			return m.updateForYou(msg)
 		case searchScreen:
 			return m.updateSearch(msg)
 		case resultsScreen:

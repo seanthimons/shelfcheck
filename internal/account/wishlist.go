@@ -134,6 +134,7 @@ func CheckWish(ctx context.Context, client *bc.Client, it libby.Tagging, opts Wi
 var (
 	seriesSuffixRe = regexp.MustCompile(`,\s*\d+$`)
 	nonWordRe      = regexp.MustCompile(`[^\p{L}\p{N}]+`)
+	seriesNumRe    = regexp.MustCompile(`(?i)^(.*?)[,;:]?\s*(?:bk\.?|book|vol\.?|volume|no\.?|#)\s*(\d+(?:\.\d+)?)\s*$`)
 )
 
 // wishQuery trims what trips up catalog title search: series numbers
@@ -147,11 +148,17 @@ func wishQuery(title string) string {
 }
 
 // AuthorKey is the first author's last name, lowercased, for matching
-// Libby's "Last, First" against the catalog's.
+// "Last, First" (catalog, Libby) against "First Last" (Hardcover).
 func AuthorKey(a string) string {
 	a = strings.Split(a, ";")[0]
-	last, _, _ := strings.Cut(a, ",")
-	return strings.ToLower(strings.TrimSpace(nonWordRe.ReplaceAllString(last, " ")))
+	last, _, hasComma := strings.Cut(a, ",")
+	last = strings.ToLower(strings.TrimSpace(nonWordRe.ReplaceAllString(last, " ")))
+	if !hasComma {
+		if f := strings.Fields(last); len(f) > 0 {
+			last = f[len(f)-1]
+		}
+	}
+	return last
 }
 
 // normTitle lowercases a title, reduces punctuation to single spaces and
