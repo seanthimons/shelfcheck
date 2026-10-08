@@ -497,6 +497,13 @@ func jsonPatron(ctx context.Context, what string, args []string) error {
 			return err
 		case "checkouts":
 			items, err := client.Checkouts(ctx, s)
+			if err != nil {
+				return err
+			}
+			items, _, lerr := st.WithLibby(ctx, items, nil)
+			if lerr != nil {
+				fmt.Fprintln(os.Stderr, "shelfcheck: warning: Libby loans:", lerr)
+			}
 			for _, c := range items {
 				it := item(c.Bib)
 				it.Due, it.Status, it.Renewed, it.Digital = c.Due, c.Status, c.Renewed, c.Digital || it.Digital
@@ -505,6 +512,13 @@ func jsonPatron(ctx context.Context, what string, args []string) error {
 			return err
 		default:
 			items, err := client.Holds(ctx, s)
+			if err != nil {
+				return err
+			}
+			_, items, lerr := st.WithLibby(ctx, nil, items)
+			if lerr != nil {
+				fmt.Fprintln(os.Stderr, "shelfcheck: warning: Libby holds:", lerr)
+			}
 			for _, h := range items {
 				it := item(h.Bib)
 				it.Status, it.Position, it.Placed, it.Digital = h.Status, h.Position, h.Placed, h.Digital || it.Digital

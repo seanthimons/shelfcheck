@@ -26,6 +26,7 @@ type (
 		holds     []bc.Hold
 		recent    []bc.HistoryItem
 		err       error
+		libbyErr  error // Libby's loans and holds couldn't be added
 	}
 	wishTitlesMsg struct {
 		seq    int
@@ -142,6 +143,9 @@ func (m Model) loadAccount() (Model, tea.Cmd) {
 			msg.recent = hist[:min(recentCount, len(hist))]
 			return err
 		})
+		if msg.err == nil {
+			msg.checkouts, msg.holds, msg.libbyErr = st.WithLibby(ctx, msg.checkouts, msg.holds)
+		}
 		return msg
 	}
 }
@@ -194,7 +198,18 @@ func (m Model) updateAccount(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.acctCursor = len(rows) - 1
 	case "enter", "right", "l":
 		if m.acctCursor < len(rows) {
-			return m.openBib(rows[m.acctCursor].bib, accountScreen)
+			b := rows[m.acctCursor].bib
+			if b.ID == "" {
+				// From Libby, with no catalog record: search for it.
+				m.input.SetValue(b.Title)
+				m.typeIdx = 1 // title
+				m.searchSeq++
+				m.searching = true
+				m.q = bc.Query{Text: b.Title, Type: bc.Title}
+				m.screen = resultsScreen
+				return m, m.doSearch(m.searchSeq, m.q, 1, false)
+			}
+			return m.openBib(b, accountScreen)
 		}
 	}
 	m.acctCursor = max(0, min(m.acctCursor, len(rows)-1))
@@ -223,6 +238,9 @@ func (m Model) viewAccount() string {
 		for j := 0; j < n; j, i = j+1, i+1 {
 			out = append(out, cursorRow(i == m.acctCursor, rows[i].line(w)))
 		}
+	}
+	if m.libbyErr != nil {
+		out = append(out, "", "  "+errStyle.Render("Libby loans and holds missing: "+m.libbyErr.Error()))
 	}
 	section("CHECKED OUT", len(m.checkouts), "Nothing checked out.")
 	section("HOLDS", len(m.holds), "No holds.")

@@ -92,9 +92,9 @@ func (r *Record) Has(title, author string) (Shelf, bool) {
 var shelfRank = map[Shelf]int{ShelfCurrent: 6, ShelfDNF: 5, ShelfRead: 4, ShelfHold: 3, ShelfWant: 2, ShelfSampled: 1}
 
 // LoadRecord gathers the reading record from the catalog session (history,
-// checkouts, holds), Libby (borrowed, Read, want to read, sampled) and the
-// Hardcover library (with the patron's ratings), as far as each is set up.
-// library is the catalog/Libby library key.
+// checkouts, holds), Libby (loans, holds, borrowed, Read, want to read,
+// sampled) and the Hardcover library (with the patron's ratings), as far as
+// each is set up. library is the catalog/Libby library key.
 func (s *Store) LoadRecord(ctx context.Context, client *bc.Client, library string) (*Record, error) {
 	r := &Record{}
 	byKey := map[string]int{}
@@ -192,6 +192,9 @@ func (s *Store) loadLibby(ctx context.Context, library string, add func(Book)) e
 	lc, err := s.LibbyClient()
 	if err != nil {
 		return err
+	}
+	if err := libbyCurrent(ctx, lc, add); err != nil {
+		return fmt.Errorf("loans and holds: %w", err)
 	}
 	tags, err := lc.Tags(ctx)
 	if err != nil {

@@ -177,6 +177,73 @@ func (c *Client) TagURL(id, name string, start, end int) string {
 	return fmt.Sprintf("%s/tag/%s/%s?%s", c.Vandal, url.PathEscape(id), enc, q.Encode())
 }
 
+// --- loans and holds -----------------------------------------------------------
+
+// Loan is a title checked out in Libby.
+type Loan struct {
+	TitleID  string
+	Title    string
+	Author   string // "Last, First"
+	Format   string // "ebook", "audiobook", "magazine"
+	Borrowed time.Time
+	Due      time.Time
+}
+
+// Hold is a title waiting in Libby.
+type Hold struct {
+	TitleID   string
+	Title     string
+	Author    string // "Last, First"
+	Format    string
+	Placed    time.Time
+	Ready     bool // available to borrow now
+	Suspended bool // paused ("deliver later")
+	Position  int  // place in line
+	WaitDays  int  // Libby's estimate
+}
+
+// Account returns the patron's current Libby loans and holds.
+func (c *Client) Account(ctx context.Context) ([]Loan, []Hold, error) {
+	type kind struct {
+		ID string `json:"id"`
+	}
+	var raw struct {
+		Loans []struct {
+			ID           string    `json:"id"`
+			Title        string    `json:"title"`
+			SortName     string    `json:"firstCreatorSortName"`
+			Type         kind      `json:"type"`
+			CheckoutDate time.Time `json:"checkoutDate"`
+			ExpireDate   time.Time `json:"expireDate"`
+		} `json:"loans"`
+		Holds []struct {
+			ID             string    `json:"id"`
+			Title          string    `json:"title"`
+			SortName       string    `json:"firstCreatorSortName"`
+			Type           kind      `json:"type"`
+			PlacedDate     time.Time `json:"placedDate"`
+			IsAvailable    bool      `json:"isAvailable"`
+			SuspensionFlag bool      `json:"suspensionFlag"`
+			Position       int       `json:"holdListPosition"`
+			WaitDays       int       `json:"estimatedWaitDays"`
+		} `json:"holds"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.SyncURL(), nil, &raw); err != nil {
+		return nil, nil, err
+	}
+	var loans []Loan
+	for _, l := range raw.Loans {
+		loans = append(loans, Loan{TitleID: l.ID, Title: l.Title, Author: l.SortName, Format: l.Type.ID,
+			Borrowed: l.CheckoutDate, Due: l.ExpireDate})
+	}
+	var holds []Hold
+	for _, h := range raw.Holds {
+		holds = append(holds, Hold{TitleID: h.ID, Title: h.Title, Author: h.SortName, Format: h.Type.ID,
+			Placed: h.PlacedDate, Ready: h.IsAvailable, Suspended: h.SuspensionFlag, Position: h.Position, WaitDays: h.WaitDays})
+	}
+	return loans, holds, nil
+}
+
 // --- tags ---------------------------------------------------------------------
 
 // Tag is one of the patron's Libby tags. Kind is set for Libby's automatic

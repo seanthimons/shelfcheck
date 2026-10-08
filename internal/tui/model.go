@@ -85,6 +85,7 @@ type Model struct {
 	acctLoading bool
 	acctLoaded  bool
 	acctErr     error
+	libbyErr    error // from adding Libby's loans and holds
 	checkouts   []bc.Checkout
 	holds       []bc.Hold
 	recent      []bc.HistoryItem
@@ -315,6 +316,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.acctLoaded = true
 			m.checkouts, m.holds, m.recent = msg.checkouts, msg.holds, msg.recent
+			m.libbyErr = msg.libbyErr
 			m.acctCursor = min(m.acctCursor, max(0, len(m.acctRows())-1))
 		}
 		return m, nil
