@@ -133,7 +133,7 @@ func (m Model) viewFooter() string {
 	case accountScreen:
 		keys = "↑↓ move · enter open · r refresh · p for you · w wishlist · / search · q quit"
 	case forYouScreen:
-		keys = "↑↓ move · enter open · h Hardcover prompt/list · r refresh · w wishlist · m account · / search · q quit"
+		keys = "↑↓ move · enter open · h open its Hardcover source · r refresh · w wishlist · m account · / search · q quit"
 	case hardcoverScreen:
 		keys = "↑↓ move · enter open · + want to read · A show all · r recheck · esc back · p for you · w wishlist · / search · q quit"
 	case wishlistScreen:

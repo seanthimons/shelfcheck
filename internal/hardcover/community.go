@@ -460,15 +460,16 @@ func (c *Client) ListBySlug(ctx context.Context, owner, slug string, limit int) 
 // linkRe finds a Hardcover link in text.
 var linkRe = regexp.MustCompile(`(?i)(?:https?://)?(?:www\.)?hardcover\.app/[^\s"'<>“”‘’]+`)
 
-// Ref is a prompt or list named by a Hardcover URL.
+// Ref is a prompt, list or vibe named by a Hardcover URL.
 type Ref struct {
-	Kind  string // "prompt" or "list"
-	Owner string // list owner's username
+	Kind  string // "prompt", "list" or "vibe"
+	Owner string // list or vibe owner's username
 	Slug  string
 }
 
-// ParseRef reads a Hardcover prompt or list URL
-// (hardcover.app/prompts/<slug>, hardcover.app/@<user>/lists/<slug>), or a
+// ParseRef reads a Hardcover prompt, list or vibe URL
+// (hardcover.app/prompts/<slug>, hardcover.app/@<user>/lists/<slug>,
+// hardcover.app/@<user>/vibes/<slug>), or a
 // bare prompt slug, ignoring quotes or angle brackets around it.
 func ParseRef(s string) (Ref, bool) {
 	if u := linkRe.FindString(s); u != "" {
@@ -498,6 +499,8 @@ func ParseRef(s string) (Ref, bool) {
 		return Ref{Kind: "prompt", Slug: parts[1]}, true
 	case len(parts) >= 3 && strings.HasPrefix(parts[0], "@") && parts[1] == "lists":
 		return Ref{Kind: "list", Owner: strings.TrimPrefix(parts[0], "@"), Slug: parts[2]}, true
+	case len(parts) >= 3 && strings.HasPrefix(parts[0], "@") && parts[1] == "vibes":
+		return Ref{Kind: "vibe", Owner: strings.TrimPrefix(parts[0], "@"), Slug: parts[2]}, true
 	}
 	return Ref{}, false
 }
@@ -528,11 +531,11 @@ func anyContains(names []string, sub string) bool {
 	return false
 }
 
-// Collection is a prompt's answers (most given first) or a list's books (in
-// list order), whichever a Ref names.
+// Collection is a prompt's answers (most given first), a list's books (in
+// list order) or a vibe's picks (best first), whichever a Ref names.
 type Collection struct {
-	Kind    string // "prompt" or "list"
-	Title   string // the question, or the list's name
+	Kind    string // "prompt", "list" or "vibe"
+	Title   string // the question, or the list's or vibe's name
 	URL     string
 	Readers int            // readers who answered a prompt
 	Books   []PromptAnswer // Votes is 0 for lists
@@ -560,6 +563,19 @@ func (c *Client) Collection(ctx context.Context, ref Ref, limit int) (Collection
 		}
 		col := Collection{Kind: "list", Title: l.Name, URL: l.URL()}
 		for _, b := range l.Items {
+			col.Books = append(col.Books, PromptAnswer{Book: b})
+		}
+		return col, nil
+	case "vibe":
+		v, ok, err := c.VibeBySlug(ctx, ref.Owner, ref.Slug, limit)
+		if err != nil {
+			return Collection{}, err
+		}
+		if !ok {
+			return Collection{}, fmt.Errorf("hardcover: no vibe %q by @%s", ref.Slug, ref.Owner)
+		}
+		col := Collection{Kind: "vibe", Title: v.Title + " for @" + v.Owner, URL: v.URL()}
+		for _, b := range v.Books {
 			col.Books = append(col.Books, PromptAnswer{Book: b})
 		}
 		return col, nil

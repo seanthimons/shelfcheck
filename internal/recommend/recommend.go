@@ -30,14 +30,17 @@ type Options struct {
 	MaxGenres  int // genres to search; default 3
 	MaxSeeds   int // liked books to find readers' co-picks for; default 6
 	MaxPicked  int // co-picked books to look for in the catalog; default 20
+	MaxVibes   int // books from Hardcover's picks for the patron to look for; default 20
 
 	// Wishlist, if non-nil, holds already-checked wishlist titles (from
 	// account.CheckWish); available ones become candidates.
 	Wishlist []account.WishItem
 
 	// Hardcover, if set, supplies series order, which library records
-	// often lack or get wrong, and what readers pick alongside books the
-	// patron liked (prompts and lists), which replaces the genre picks.
+	// often lack or get wrong; its own picks for the patron (the
+	// "recommendations" and "top-picks" vibes); and what readers pick
+	// alongside books the patron liked (prompts and lists). These replace
+	// the genre picks.
 	Hardcover *hardcover.Client
 
 	// Debug, if set, receives a line per decision.
@@ -65,6 +68,9 @@ func (o Options) withDefaults() Options {
 	if o.MaxPicked == 0 {
 		o.MaxPicked = 20
 	}
+	if o.MaxVibes == 0 {
+		o.MaxVibes = 20
+	}
 	if o.HomeName == "" {
 		o.HomeName = "branch " + o.Home
 	}
@@ -84,8 +90,8 @@ type Pick struct {
 	Ebook   bool   // an ebook can be borrowed now
 	Score   float64
 	Reasons []string
-	// From is the Hardcover prompt or list behind a "readers also picked"
-	// reason, as a URL.
+	// From is the Hardcover prompt, list or vibe behind a Hardcover reason
+	// ("readers also picked", "Hardcover recommends"), as a URL.
 	From string
 	key  string
 	why  map[string]reason // strongest reason of each kind
@@ -270,6 +276,7 @@ func Recommend(ctx context.Context, client *bc.Client, rec *account.Record, opts
 		{"wishlist", e.wishlist},
 		{"series you're reading", e.series},
 		{"authors you come back to", e.authors},
+		{"Hardcover's picks for you", e.vibes},
 		{"what readers also picked", e.alsoPicked},
 		{"your genres", e.genres},
 	}
@@ -349,6 +356,12 @@ func (e *engine) add(b bc.Bib, kind string, score float64, text string) *Pick {
 		}
 		p.Print = true
 	}
+	p.note(kind, score, text)
+	return p
+}
+
+// note records a reason, keeping the strongest of each kind.
+func (p *Pick) note(kind string, score float64, text string) {
 	if old, ok := p.why[kind]; !ok || score > old.score {
 		order := len(p.why)
 		if ok {
@@ -356,7 +369,6 @@ func (e *engine) add(b bc.Bib, kind string, score float64, text string) *Pick {
 		}
 		p.why[kind] = reason{score, text, order}
 	}
-	return p
 }
 
 func (e *engine) wishlist(ctx context.Context) error {
@@ -517,7 +529,7 @@ func (e *engine) findTitle(ctx context.Context, title, author, kind string, scor
 		if account.WorkKey(b.Title, b.Authors[0]) != account.WorkKey(title, author) && !account.SameTitle(b.Title, title) {
 			continue
 		}
-		if subtitlesClash(b.Subtitle, title) {
+		if subtitlesClash(b.Title, b.Subtitle, title) {
 			continue // "Mistborn: Secret History" isn't "Mistborn: The Final Empire"
 		}
 		if p := e.add(b, kind, score, reason); p != nil {
@@ -528,10 +540,13 @@ func (e *engine) findTitle(ctx context.Context, title, author, kind string, scor
 	return found, nil
 }
 
-// subtitlesClash reports whether a catalog subtitle and the subtitle in
-// title (after a colon) name different books. Either missing, or a generic
-// one ("A Novel"), is no clash.
-func subtitlesClash(catalogSub, title string) bool {
+// subtitlesClash reports whether a catalog record's subtitle (its own field,
+// or after a colon in its title) and the subtitle in title name different
+// books. Either missing, or a generic one ("A Novel"), is no clash.
+func subtitlesClash(catalogTitle, catalogSub, title string) bool {
+	if catalogSub == "" {
+		_, catalogSub, _ = strings.Cut(catalogTitle, ":")
+	}
 	_, wantSub, ok := strings.Cut(title, ":")
 	norm := func(s string) string {
 		s = strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {

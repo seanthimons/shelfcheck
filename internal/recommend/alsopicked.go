@@ -201,6 +201,10 @@ func (e *engine) alsoPicked(ctx context.Context) error {
 		}
 		score := 1.5 + 2.5*math.Min(weight(c), 1)
 		e.opts.Debug("  co-pick %.2f %q by %s (%d readers): %s", weight(c), c.Title, c.Author, c.Readers, reason)
+		if p := e.picks[account.WorkKey(c.Title, c.Author)]; p != nil {
+			p.note("picked", score, reason) // found already; no need to search again
+			continue
+		}
 		found, err := e.findTitle(ctx, c.Title, c.Author, "picked", score, reason)
 		if err != nil {
 			return err
@@ -215,24 +219,30 @@ func (e *engine) alsoPicked(ctx context.Context) error {
 	return nil
 }
 
-// usable drops co-picks the patron has read or has, later books in a series
-// (the series stage handles ones they read, and book 4 of one they haven't
-// started is no pick) and unnamed books, keeping the order.
+// usable drops co-picks that aren't candidates (see candidate), keeping the
+// order.
 func (e *engine) usable(cps []hardcover.CoPick) []hardcover.CoPick {
 	var out []hardcover.CoPick
 	for _, c := range cps {
-		if _, has := e.rec.Has(c.Title, c.Author); has {
-			continue
+		if e.candidate(c.Book) {
+			out = append(out, c)
 		}
-		if e.ahead[account.WorkKey(c.Title, c.Author)] || placeholderTitle(c.Title) {
-			continue
-		}
-		if c.Series != "" && (c.SeriesPos > 1 || e.readsSeriesName(c.Series)) {
-			continue
-		}
-		out = append(out, c)
 	}
 	return out
+}
+
+// candidate reports whether a Hardcover book could be suggested: not read,
+// had or on hold; not a later book in a series (the series stage handles
+// ones the patron reads, and book 4 of one they haven't started is no
+// pick); and named.
+func (e *engine) candidate(b hardcover.Book) bool {
+	if _, has := e.rec.Has(b.Title, b.Author); has {
+		return false
+	}
+	if e.ahead[account.WorkKey(b.Title, b.Author)] || placeholderTitle(b.Title) {
+		return false
+	}
+	return b.Series == "" || (b.SeriesPos <= 1 && !e.readsSeriesName(b.Series))
 }
 
 // sourceReason explains a single seed's co-pick.

@@ -301,10 +301,7 @@ func (m Model) viewHardcover() string {
 	if m.hc.failed > 0 {
 		head += errStyle.Render(fmt.Sprintf(" · %d couldn't be checked", m.hc.failed))
 	}
-	what := "top answers"
-	if col.Kind == "list" {
-		what = "list"
-	}
+	what := map[string]string{"prompt": "top answers", "list": "list", "vibe": "Hardcover's picks"}[col.Kind]
 	sub := "  " + dimStyle.Render(what+" on "+col.URL+" · on the shelf at "+m.homeName+", or ebooks now")
 	if m.hc.all {
 		sub = "  " + dimStyle.Render("showing every book (A to show only available)")
