@@ -16,18 +16,28 @@ import (
 
 // Search runs a catalog search. page is 1-based; results come 25 per page
 // (the gateway ignores a smaller limit).
-func (c *Client) Search(ctx context.Context, query string, typ SearchType, page int) (*SearchResult, error) {
-	query = strings.TrimSpace(query)
-	if query == "" {
+func (c *Client) Search(ctx context.Context, q Query, page int) (*SearchResult, error) {
+	text := strings.TrimSpace(q.Text)
+	if text == "" {
 		return nil, errors.New("bibliocommons: empty search query")
 	}
+	typ := q.Type
 	if typ == "" {
 		typ = Keyword
 	}
 	if page < 1 {
 		page = 1
 	}
-	params := url.Values{"query": {query}, "searchType": {string(typ)}}
+	params := url.Values{"query": {text}, "searchType": {string(typ)}}
+	if typ == Genre {
+		// There's no genre searchType; the catalog's boolean ("bl") query
+		// language has a genre field instead.
+		params.Set("query", "genre:("+strings.NewReplacer("(", " ", ")", " ", `"`, " ").Replace(text)+")")
+		params.Set("searchType", "bl")
+	}
+	if q.Genre != "" {
+		params.Set("f_GENRE_HEADINGS", q.Genre)
+	}
 	if page > 1 {
 		params.Set("page", strconv.Itoa(page))
 	}
@@ -37,7 +47,15 @@ func (c *Client) Search(ctx context.Context, query string, typ SearchType, page 
 		return nil, err
 	}
 	p := raw.CatalogSearch.Pagination
-	res := &SearchResult{Query: query, Page: p.Page, Pages: p.Pages, Total: p.Count}
+	res := &SearchResult{Query: q, Page: p.Page, Pages: p.Pages, Total: p.Count}
+	for _, f := range raw.CatalogSearch.Fields {
+		if f.ID != "GENRE_HEADINGS" {
+			continue
+		}
+		for _, ff := range f.FieldFilters {
+			res.Genres = append(res.Genres, Facet{Value: ff.Value, Count: ff.Count})
+		}
+	}
 	for _, r := range raw.CatalogSearch.Results {
 		if b, ok := raw.Entities.Bibs[r.Representative]; ok {
 			res.Bibs = append(res.Bibs, b.toBib())
@@ -111,7 +129,14 @@ type rawPagination struct {
 type rawSearch struct {
 	CatalogSearch struct {
 		Pagination rawPagination `json:"pagination"`
-		Results    []struct {
+		Fields     []struct {
+			ID           string `json:"id"`
+			FieldFilters []struct {
+				Value string `json:"value"`
+				Count int    `json:"count"`
+			} `json:"fieldFilters"`
+		} `json:"fields"`
+		Results []struct {
 			Representative string   `json:"representative"`
 			Manifestations []string `json:"manifestations"`
 		} `json:"results"`

@@ -22,7 +22,7 @@ const (
 	detailScreen
 )
 
-var searchTypes = []bc.SearchType{bc.Keyword, bc.Title, bc.Author, bc.Subject, bc.Series}
+var searchTypes = []bc.SearchType{bc.Keyword, bc.Title, bc.Author, bc.Subject, bc.Genre, bc.Series}
 
 const requestTimeout = 20 * time.Second
 
@@ -39,9 +39,9 @@ type Model struct {
 	typeIdx int
 
 	// Current search.
-	query       string
-	qtype       bc.SearchType
+	q           bc.Query
 	results     []bc.Bib
+	genres      []bc.Facet // top genres across the current search
 	total       int
 	page, pages int
 	cursor      int
@@ -49,6 +49,10 @@ type Model struct {
 	searchSeq   int // drops responses from superseded searches
 	searching   bool
 	loadingMore bool
+
+	// Genre filter picker, opened with f on the results screen.
+	picking    bool
+	pickCursor int
 
 	// Per-bib data, shared by the results list (home-branch marker) and the
 	// detail screen.
@@ -112,8 +116,7 @@ func New(client *bc.Client, home, query string) Model {
 	if strings.TrimSpace(query) != "" {
 		m.searchSeq = 1
 		m.searching = true
-		m.query = strings.TrimSpace(query)
-		m.qtype = bc.Keyword
+		m.q = bc.Query{Text: strings.TrimSpace(query)}
 	}
 	return m
 }
@@ -121,19 +124,19 @@ func New(client *bc.Client, home, query string) Model {
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spin.Tick, m.fetchLocations()}
 	if m.searching {
-		cmds = append(cmds, m.doSearch(m.searchSeq, m.query, m.qtype, 1, false))
+		cmds = append(cmds, m.doSearch(m.searchSeq, m.q, 1, false))
 	}
 	return tea.Batch(cmds...)
 }
 
 // --- commands ---------------------------------------------------------------
 
-func (m Model) doSearch(seq int, q string, typ bc.SearchType, page int, more bool) tea.Cmd {
+func (m Model) doSearch(seq int, q bc.Query, page int, more bool) tea.Cmd {
 	c := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
-		res, err := c.Search(ctx, q, typ, page)
+		res, err := c.Search(ctx, q, page)
 		return searchMsg{seq: seq, more: more, res: res, err: err}
 	}
 }
@@ -226,6 +229,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.results = append(m.results, msg.res.Bibs...)
 		} else {
 			m.results = msg.res.Bibs
+			m.genres = msg.res.Genres
 			m.cursor, m.offset = 0, 0
 			m.screen = resultsScreen
 			m.input.Blur()
@@ -289,8 +293,8 @@ func (m Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.searchSeq++
 		m.searching = true
 		m.err = nil
-		m.query, m.qtype = q, searchTypes[m.typeIdx]
-		return m, m.doSearch(m.searchSeq, m.query, m.qtype, 1, false)
+		m.q = bc.Query{Text: q, Type: searchTypes[m.typeIdx]}
+		return m, m.doSearch(m.searchSeq, m.q, 1, false)
 	case "tab":
 		m.typeIdx = (m.typeIdx + 1) % len(searchTypes)
 		return m, nil
@@ -311,10 +315,23 @@ func (m Model) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.picking {
+		return m.updatePicker(msg)
+	}
 	page := max(1, m.listHeight())
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
+	case "f":
+		if len(m.genres) > 0 || m.q.Genre != "" {
+			m.picking, m.pickCursor = true, 0
+		}
+		return m, nil
+	case "F":
+		if m.q.Genre != "" {
+			return m.applyGenre("")
+		}
+		return m, nil
 	case "/", "s", "esc":
 		return m, m.toSearch()
 	case "up", "k":
@@ -339,6 +356,42 @@ func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.clampScroll()
 	return m, tea.Batch(m.prefetchVisible(), m.maybeLoadMore())
+}
+
+// pickerOptions is "All genres" (clears the filter) followed by the facets.
+func (m Model) pickerOptions() []bc.Facet {
+	return append([]bc.Facet{{Value: ""}}, m.genres...)
+}
+
+func (m Model) updatePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	opts := m.pickerOptions()
+	switch msg.String() {
+	case "q":
+		return m, tea.Quit
+	case "esc", "f":
+		m.picking = false
+	case "up", "k":
+		m.pickCursor = max(0, m.pickCursor-1)
+	case "down", "j":
+		m.pickCursor = min(len(opts)-1, m.pickCursor+1)
+	case "enter":
+		m.picking = false
+		return m.applyGenre(opts[m.pickCursor].Value)
+	}
+	return m, nil
+}
+
+// applyGenre reruns the current search narrowed to genre ("" clears it).
+func (m Model) applyGenre(genre string) (tea.Model, tea.Cmd) {
+	if genre == m.q.Genre {
+		return m, nil
+	}
+	m.q.Genre = genre
+	m.searchSeq++
+	m.searching = true
+	m.loadingMore = false
+	m.err = nil
+	return m, m.doSearch(m.searchSeq, m.q, 1, false)
 }
 
 func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -398,7 +451,7 @@ func (m *Model) maybeLoadMore() tea.Cmd {
 		return nil
 	}
 	m.loadingMore = true
-	return m.doSearch(m.searchSeq, m.query, m.qtype, m.page+1, true)
+	return m.doSearch(m.searchSeq, m.q, m.page+1, true)
 }
 
 func (m *Model) clampScroll() {

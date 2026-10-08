@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +57,7 @@ func fixtureServer(t *testing.T, hits *atomic.Int32) *Client {
 
 func TestSearch(t *testing.T) {
 	c := fixtureServer(t, nil)
-	res, err := c.Search(context.Background(), "Alien Clay", Keyword, 1)
+	res, err := c.Search(context.Background(), Query{Text: "Alien Clay"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,9 +99,46 @@ func TestSearch(t *testing.T) {
 	}
 }
 
+func TestSearchGenres(t *testing.T) {
+	c := fixtureServer(t, nil)
+	res, err := c.Search(context.Background(), Query{Text: "Alien Clay"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Genres) == 0 || res.Genres[0].Value == "" || res.Genres[0].Count == 0 {
+		t.Fatalf("genres = %+v", res.Genres)
+	}
+}
+
+func TestSearchParams(t *testing.T) {
+	var got url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New("testlib")
+	c.BaseURL = srv.URL
+	ctx := context.Background()
+
+	if _, err := c.Search(ctx, Query{Text: "space (operas)", Type: Genre, Genre: "Fiction"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("searchType") != "bl" || got.Get("query") != "genre:(space  operas )" ||
+		got.Get("f_GENRE_HEADINGS") != "Fiction" || got.Get("page") != "2" {
+		t.Errorf("params = %v", got)
+	}
+	if _, err := c.Search(ctx, Query{Text: "dune", Type: Title}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("searchType") != "title" || got.Get("query") != "dune" || got.Has("f_GENRE_HEADINGS") || got.Has("page") {
+		t.Errorf("params = %v", got)
+	}
+}
+
 func TestSearchEmptyQuery(t *testing.T) {
 	c := fixtureServer(t, nil)
-	if _, err := c.Search(context.Background(), "  ", Keyword, 1); err == nil {
+	if _, err := c.Search(context.Background(), Query{Text: "  "}, 1); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -230,7 +268,7 @@ func TestCacheAvoidsSecondRequest(t *testing.T) {
 	c := fixtureServer(t, &hits)
 	ctx := context.Background()
 	for range 3 {
-		if _, err := c.Search(ctx, "Alien Clay", Keyword, 1); err != nil {
+		if _, err := c.Search(ctx, Query{Text: "Alien Clay"}, 1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -257,9 +295,9 @@ func TestLive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	for _, typ := range []SearchType{Keyword, Title, Author, Subject, Series} {
-		q := map[SearchType]string{Keyword: "alien clay", Title: "dune", Author: "tchaikovsky", Subject: "beekeeping", Series: "discworld"}[typ]
-		res, err := c.Search(ctx, q, typ, 1)
+	for _, typ := range []SearchType{Keyword, Title, Author, Subject, Series, Genre} {
+		q := map[SearchType]string{Keyword: "alien clay", Title: "dune", Author: "tchaikovsky", Subject: "beekeeping", Series: "discworld", Genre: "space operas"}[typ]
+		res, err := c.Search(ctx, Query{Text: q, Type: typ}, 1)
 		if err != nil {
 			t.Fatalf("%s search: %v", typ, err)
 		}
@@ -269,7 +307,20 @@ func TestLive(t *testing.T) {
 		}
 	}
 
-	res, err := c.Search(ctx, "alien clay", Keyword, 1)
+	all, err := c.Search(ctx, Query{Text: "tchaikovsky"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scifi, err := c.Search(ctx, Query{Text: "tchaikovsky", Genre: "Science fiction"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("tchaikovsky: %d results, %d with genre filter; top genres %v", all.Total, scifi.Total, all.Genres[:min(4, len(all.Genres))])
+	if len(all.Genres) == 0 || scifi.Total == 0 || scifi.Total >= all.Total {
+		t.Errorf("genre filter didn't narrow results: %d -> %d", all.Total, scifi.Total)
+	}
+
+	res, err := c.Search(ctx, Query{Text: "alien clay"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

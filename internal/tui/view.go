@@ -69,7 +69,14 @@ func (m Model) viewFooter() string {
 			keys += " · esc quit"
 		}
 	case resultsScreen:
-		keys = "↑↓ move · enter open · / new search · q quit"
+		switch {
+		case m.picking:
+			keys = "↑↓ move · enter apply · esc cancel"
+		case m.q.Genre != "":
+			keys = "↑↓ move · enter open · f genre · F clear genre · / new search · q quit"
+		default:
+			keys = "↑↓ move · enter open · f filter by genre · / new search · q quit"
+		}
 	case detailScreen:
 		keys = "↑↓ scroll · r refresh · esc back · / search · q quit"
 	}
@@ -116,12 +123,22 @@ func (m Model) viewResults() string {
 	if m.searching {
 		return "\n  " + m.spin.View() + " Searching…"
 	}
-	head := fmt.Sprintf("%s for %s", plural(m.total, "result"), titleStyle.Render(fmt.Sprintf("%q", m.query)))
-	if m.qtype != bc.Keyword {
-		head += dimStyle.Render(" (" + string(m.qtype) + ")")
+	if m.picking {
+		return m.viewPicker()
+	}
+	head := fmt.Sprintf("%s for %s", plural(m.total, "result"), titleStyle.Render(fmt.Sprintf("%q", m.q.Text)))
+	if m.q.Type != "" && m.q.Type != bc.Keyword {
+		head += dimStyle.Render(" (" + string(m.q.Type) + ")")
+	}
+	if m.q.Genre != "" {
+		head += dimStyle.Render(" · genre: ") + accentStyle.Render(m.q.Genre)
 	}
 	if len(m.results) == 0 {
-		return "\n  No results for " + titleStyle.Render(fmt.Sprintf("%q", m.query)) + ". Press / to search again."
+		msg := "\n  No results for " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text))
+		if m.q.Genre != "" {
+			return msg + " in " + m.q.Genre + ". Press F to clear the genre filter."
+		}
+		return msg + ". Press / to search again."
 	}
 
 	// Columns: marker, title, author, format, year, rating, availability, home.
@@ -160,6 +177,34 @@ func (m Model) viewResults() string {
 			rows = append(rows, accentStyle.Render("▸ ")+selStyle.Render(ansi.Strip(line)))
 		} else {
 			rows = append(rows, "  "+m.styleRow(b, line))
+		}
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m Model) viewPicker() string {
+	rows := []string{"  Filter " + titleStyle.Render(fmt.Sprintf("%q", m.q.Text)) + " by genre", ""}
+	opts := m.pickerOptions()
+	countW := len(fmt.Sprint(m.total))
+	nameW := max(10, min(50, m.width-countW-8))
+	// Keep the cursor on screen if the list is taller than the window.
+	h := m.listHeight()
+	start := max(0, min(m.pickCursor-h+1, len(opts)-h))
+	for i := start; i < min(len(opts), start+h); i++ {
+		o := opts[i]
+		name, count := o.Value, fmt.Sprint(o.Count)
+		if name == "" {
+			name, count = "All genres", ""
+		}
+		mark := "  "
+		if o.Value == m.q.Genre {
+			mark = okStyle.Render("✓ ")
+		}
+		line := pad(name, nameW) + " " + fmt.Sprintf("%*s", countW, count)
+		if i == m.pickCursor {
+			rows = append(rows, accentStyle.Render("▸ ")+mark+selStyle.Render(line))
+		} else {
+			rows = append(rows, "  "+mark+line)
 		}
 	}
 	return strings.Join(rows, "\n")

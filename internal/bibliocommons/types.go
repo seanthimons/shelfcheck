@@ -54,14 +54,31 @@ const (
 	Author  SearchType = "author"
 	Subject SearchType = "subject"
 	Series  SearchType = "series"
+	Genre   SearchType = "genre" // not a gateway searchType; sent as a genre:(...) query
 )
 
+// Query describes a search.
+type Query struct {
+	Text string
+	Type SearchType
+	// Genre, if set, narrows results to one genre heading exactly as it
+	// appears in SearchResult.Genres, e.g. "Science fiction".
+	Genre string
+}
+
 type SearchResult struct {
-	Query string
-	Page  int // 1-based
-	Pages int
-	Total int
-	Bibs  []Bib
+	Query  Query
+	Page   int // 1-based
+	Pages  int
+	Total  int
+	Bibs   []Bib
+	Genres []Facet // the most common genres across all results (top 15)
+}
+
+// Facet is one value of a search refinement and how many results have it.
+type Facet struct {
+	Value string
+	Count int
 }
 
 // Availability is the per-copy detail for one Bib.
