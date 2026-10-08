@@ -129,7 +129,10 @@ func (m Model) viewFooter() string {
 			}
 		}
 	case detailScreen:
-		keys = "↑↓ scroll · r refresh · esc back · / search · p for you · w wishlist · m account · q quit"
+		keys = "↑↓ scroll · r refresh · c search catalog · esc back · / search · p for you · w wishlist · m account · q quit"
+		if m.selected.ID == "" {
+			keys = "↑↓ scroll · c search catalog · esc back · / search · p for you · w wishlist · m account · q quit"
+		}
 	case accountScreen:
 		keys = "↑↓ move · enter open · r refresh · p for you · w wishlist · / search · q quit"
 	case forYouScreen:
@@ -291,6 +294,19 @@ func (m Model) renderDetail() string {
 	var out []string
 	add := func(lines ...string) { out = append(out, lines...) }
 
+	if b.ID == "" {
+		// No library record: Hardcover is all there is.
+		title, meta := m.hcHeader()
+		add("", wrap.Render(titleStyle.Render(title)))
+		if meta != "" {
+			add(wrap.Render(meta))
+		}
+		add("", dimStyle.Render("No record at the library here · c searches the catalog for it (other titles, holds)"))
+		add(m.renderHardcover(w, true)...)
+		add("")
+		return indent(strings.Join(out, "\n"), 2)
+	}
+
 	title := b.Title
 	if b.Subtitle != "" {
 		title += ": " + b.Subtitle
@@ -331,6 +347,9 @@ func (m Model) renderDetail() string {
 			add(wrap.Render(dimStyle.Render("Subjects: ") + strings.Join(b.Subjects, ", ")))
 		}
 	}
+
+	// Hardcover's description fills in when the library has none.
+	add(m.renderHardcover(w, b.Description == "")...)
 
 	d, dErr := m.details[b.ID], m.detailsErr[b.ID]
 	switch {

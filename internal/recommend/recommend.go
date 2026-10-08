@@ -130,6 +130,8 @@ type Elsewhere struct {
 	From   string // the Hardcover source behind Reason, as a URL
 	URL    string // the book on Hardcover
 	Bib    bc.Bib
+
+	HardcoverID int
 }
 
 // Status says where a library copy stands, from its record's summary:

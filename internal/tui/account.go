@@ -94,7 +94,7 @@ func (m Model) navKey(key string) (Model, tea.Cmd, bool) {
 
 // openBib shows b on the detail screen; esc returns to from.
 func (m Model) openBib(b bc.Bib, from screen) (tea.Model, tea.Cmd) {
-	m.selected = b
+	m.selected, m.selectedHC = b, 0
 	m.backScreen = from
 	m.screen = detailScreen
 	id := b.ID
@@ -107,6 +107,8 @@ func (m Model) openBib(b bc.Bib, from screen) (tea.Model, tea.Cmd) {
 		delete(m.detailsErr, id)
 		cmds = append(cmds, m.fetchDetails(id))
 	}
+	m, hcCmd := m.fetchHCInfo()
+	cmds = append(cmds, hcCmd)
 	m.refreshDetail()
 	m.vp.GotoTop()
 	return m, tea.Batch(cmds...)
@@ -200,14 +202,8 @@ func (m Model) updateAccount(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.acctCursor < len(rows) {
 			b := rows[m.acctCursor].bib
 			if b.ID == "" {
-				// From Libby, with no catalog record: search for it.
-				m.input.SetValue(b.Title)
-				m.typeIdx = 1 // title
-				m.searchSeq++
-				m.searching = true
-				m.q = bc.Query{Text: b.Title, Type: bc.Title}
-				m.screen = resultsScreen
-				return m, m.doSearch(m.searchSeq, m.q, 1, false)
+				// From Libby, with no catalog record: show it from Hardcover.
+				return m.openBook(b.Title, firstOr(b.Authors, ""), 0, accountScreen)
 			}
 			return m.openBib(b, accountScreen)
 		}

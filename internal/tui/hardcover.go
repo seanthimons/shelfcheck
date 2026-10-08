@@ -225,18 +225,13 @@ func (m Model) updateHardcover(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.hc.cursor = len(vis) - 1
 	case "enter", "right", "l":
 		if m.hc.cursor < len(vis) {
-			it := m.hc.items[vis[m.hc.cursor]]
-			if b, ok := bestMatch(it); ok {
-				return m.openBib(b, hardcoverScreen)
+			it, b := m.hc.items[vis[m.hc.cursor]], m.hc.col.Books[vis[m.hc.cursor]]
+			if bib, ok := bestMatch(it); ok {
+				return m.openBib(bib, hardcoverScreen)
 			}
-			// Unavailable: search for it so its holds and branches show.
-			m.input.SetValue(it.Tagging.Title)
-			m.typeIdx = 1 // title
-			m.searchSeq++
-			m.searching = true
-			m.q = bc.Query{Text: it.Tagging.Title, Type: bc.Title}
-			m.screen = resultsScreen
-			return m, m.doSearch(m.searchSeq, m.q, 1, false)
+			// Unavailable: show it from Hardcover (c there searches the
+			// catalog for holds and other branches).
+			return m.openBook(b.Title, b.Author, b.ID, hardcoverScreen)
 		}
 	}
 	m.hc.cursor = max(0, min(m.hc.cursor, len(vis)-1))

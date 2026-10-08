@@ -14,6 +14,7 @@ import (
 
 	"shelfcheck/internal/account"
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/hardcover"
 	"shelfcheck/internal/libby"
 	"shelfcheck/internal/recommend"
 	"shelfcheck/internal/theme"
@@ -77,7 +78,13 @@ type Model struct {
 	detailsErr   map[string]error
 
 	selected   bc.Bib
+	selectedHC int    // the selected book's Hardcover ID, when it has no catalog record and it's known
 	backScreen screen // where esc on the detail screen returns to
+
+	// Hardcover's metadata for detail-screen books, by detailKey; see
+	// hcinfo.go. hcLib is the patron's Hardcover library, once loaded.
+	hcInfo map[string]*hcInfo
+	hcLib  map[int]hardcover.UserBook
 
 	// Account and wishlist screens; see account.go. acct is nil when the
 	// patron's files aren't available (e.g. over SSH).
@@ -173,6 +180,7 @@ func New(client *bc.Client, home string, homeOnly bool, query string, acct *acco
 		availErr:     map[string]error{},
 		details:      map[string]*bc.Details{},
 		detailsErr:   map[string]error{},
+		hcInfo:       map[string]*hcInfo{},
 		vp:           viewport.New(),
 		spin:         spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(accentStyle)),
 	}
@@ -327,6 +335,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case recProgressMsg, recDoneMsg:
 		return m.handleRecMsg(msg)
 
+	case hcInfoMsg:
+		return m.handleHCInfo(msg)
+
 	case hcCollectionMsg, hcCheckedMsg, hcShelvedMsg:
 		return m.handleHardcoverMsg(msg)
 
@@ -453,7 +464,12 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/", "s":
 		return m, m.toSearch()
+	case "c":
+		return m.searchSelected()
 	case "r":
+		if m.selected.ID == "" {
+			return m, nil // nothing at the library to refresh
+		}
 		// The client caches availability for a minute, so this is cheap to mash.
 		if !m.availPending[m.selected.ID] {
 			m.availPending[m.selected.ID] = true

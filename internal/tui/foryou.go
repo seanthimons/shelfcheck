@@ -178,7 +178,7 @@ func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if u.Bib.ID != "" {
 				return m.openBib(u.Bib, forYouScreen) // its branches and holds
 			}
-			m.flash = "not at the library · " + u.URL
+			return m.openBook(u.Title, u.Author, u.HardcoverID, forYouScreen)
 		}
 	case "h":
 		from := ""

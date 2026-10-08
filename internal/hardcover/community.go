@@ -94,7 +94,8 @@ func (c *Client) FindBook(ctx context.Context, title, author string) (Book, bool
 			} `json:"results"`
 		} `json:"search"`
 	}
-	q := strings.TrimSpace(shortTitle(title) + " " + displayName(author))
+	// Title and last name: initials ("R. F. Kuang") pull in stray matches.
+	q := strings.TrimSpace(shortTitle(title) + " " + lastName(author))
 	if err := c.Query(ctx, bookSearchQuery, map[string]any{"q": q}, &found); err != nil {
 		return Book{}, false, err
 	}
@@ -515,22 +516,19 @@ func ParseRef(s string) (Ref, bool) {
 	return Ref{}, false
 }
 
-// shortTitle drops a subtitle ("Upgrade: A Novel" -> "Upgrade").
+// shortTitle drops a subtitle or an alternative title ("Upgrade: A Novel"
+// -> "Upgrade", "Babel, or The Necessity of Violence" -> "Babel").
 func shortTitle(t string) string {
 	if i := strings.IndexAny(t, ":("); i > 3 {
 		t = t[:i]
 	}
+	if loc := altTitleRe.FindStringIndex(t); loc != nil && loc[0] > 3 {
+		t = t[:loc[0]]
+	}
 	return strings.TrimSpace(t)
 }
 
-// displayName turns "Wells, Martha" into "Martha Wells".
-func displayName(a string) string {
-	last, first, ok := strings.Cut(a, ",")
-	if !ok {
-		return strings.TrimSpace(a)
-	}
-	return strings.TrimSpace(first) + " " + strings.TrimSpace(last)
-}
+var altTitleRe = regexp.MustCompile(`(?i)[,;]\s*or\b`)
 
 func anyContains(names []string, sub string) bool {
 	for _, n := range names {

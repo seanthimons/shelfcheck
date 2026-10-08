@@ -27,7 +27,7 @@ func (e *engine) elsewhere(ctx context.Context, b hardcover.Book, reason, from s
 	if err != nil {
 		return err
 	}
-	u := Elsewhere{Title: b.Title, Author: b.Author, Reason: reason, From: from, URL: b.URL(), Bib: bib}
+	u := Elsewhere{Title: b.Title, Author: b.Author, Reason: reason, From: from, URL: b.URL(), Bib: bib, HardcoverID: b.ID}
 	switch {
 	case ok && len(e.notOnShelf) < maxElsewhere:
 		e.notOnShelf = append(e.notOnShelf, u)
