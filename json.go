@@ -770,13 +770,24 @@ type pickOut struct {
 	From          string   `json:"hardcover,omitempty"` // prompt or list behind a "readers also picked" reason
 }
 
+type elsewhereOut struct {
+	Title        string `json:"title"`
+	Author       string `json:"author,omitempty"`
+	Why          string `json:"why"`
+	Status       string `json:"status"`                // at the library: "2 in at other branches", "not at the library", ...
+	CatalogURL   string `json:"catalog_url,omitempty"` // the library's record, if it has one
+	HardcoverURL string `json:"hardcover_url,omitempty"`
+}
+
 type profileOut struct {
-	UpNext    []string `json:"up_next_not_available,omitempty"`
-	Seeds     []string `json:"also_picked_from,omitempty"`
-	BooksRead int      `json:"books_read"`
-	Series    []string `json:"active_series"`
-	Authors   []string `json:"top_authors"`
-	Genres    []string `json:"top_genres"`
+	NotOnShelf []elsewhereOut `json:"recommended_not_on_shelf,omitempty"`
+	ToBuy      []elsewhereOut `json:"recommended_to_buy,omitempty"`
+	UpNext     []string       `json:"up_next_not_available,omitempty"`
+	Seeds      []string       `json:"also_picked_from,omitempty"`
+	BooksRead  int            `json:"books_read"`
+	Series     []string       `json:"active_series"`
+	Authors    []string       `json:"top_authors"`
+	Genres     []string       `json:"top_genres"`
 }
 
 func jsonRecommend(ctx context.Context, args []string) error {
@@ -838,6 +849,18 @@ func jsonRecommend(ctx context.Context, args []string) error {
 		Picks   []pickOut  `json:"picks"`
 	}{Picks: []pickOut{}}
 	out.Profile.BooksRead, out.Profile.Seeds = prof.Read, prof.Seeds
+	elsewhere := func(us []recommend.Elsewhere) []elsewhereOut {
+		var out []elsewhereOut
+		for _, u := range us {
+			eo := elsewhereOut{Title: u.Title, Author: u.Author, Why: u.Reason, Status: u.Status(), HardcoverURL: u.URL}
+			if u.Bib.ID != "" {
+				eo.CatalogURL = newBookOut(o.library, u.Bib).URL
+			}
+			out = append(out, eo)
+		}
+		return out
+	}
+	out.Profile.NotOnShelf, out.Profile.ToBuy = elsewhere(prof.NotOnShelf), elsewhere(prof.ToBuy)
 	for _, u := range prof.UpNext {
 		out.Profile.UpNext = append(out.Profile.UpNext, fmt.Sprintf("%s #%v: %s by %s", u.Series, u.Position, u.Title, u.Author))
 	}

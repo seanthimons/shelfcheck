@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	bc "shelfcheck/internal/bibliocommons"
 	"shelfcheck/internal/recommend"
 )
 
@@ -117,13 +118,36 @@ func (m Model) handleRecMsg(msg tea.Msg) (Model, tea.Cmd) {
 			m.recDone = true
 			m.recPicks, m.recProfile = msg.picks, msg.profile
 		}
-		m.recCursor = max(0, min(m.recCursor, len(m.recPicks)-1))
+		m.recCursor = max(0, min(m.recCursor, m.forYouRows()-1))
 	}
 	return m, nil
 }
 
+// forYouRows counts the selectable rows: picks, then Hardcover's picks the
+// library has but not on the shelf now, then ones it doesn't have.
+func (m Model) forYouRows() int {
+	return len(m.recPicks) + len(m.recProfile.NotOnShelf) + len(m.recProfile.ToBuy)
+}
+
+// elsewhereAt returns the not-on-the-shelf or to-buy entry at row i, if
+// row i is one.
+func (m Model) elsewhereAt(i int) (recommend.Elsewhere, bool) {
+	i -= len(m.recPicks)
+	if i < 0 {
+		return recommend.Elsewhere{}, false
+	}
+	if i < len(m.recProfile.NotOnShelf) {
+		return m.recProfile.NotOnShelf[i], true
+	}
+	i -= len(m.recProfile.NotOnShelf)
+	if i < len(m.recProfile.ToBuy) {
+		return m.recProfile.ToBuy[i], true
+	}
+	return recommend.Elsewhere{}, false
+}
+
 func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	n := len(m.recPicks)
+	n := m.forYouRows()
 	h := max(1, m.listHeight()/2)
 	switch msg.String() {
 	case "q":
@@ -147,12 +171,24 @@ func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		m.recCursor = n - 1
 	case "enter", "right", "l":
-		if m.recCursor < n {
+		if m.recCursor < len(m.recPicks) {
 			return m.openBib(m.recPicks[m.recCursor].Bib, forYouScreen)
 		}
+		if u, ok := m.elsewhereAt(m.recCursor); ok {
+			if u.Bib.ID != "" {
+				return m.openBib(u.Bib, forYouScreen) // its branches and holds
+			}
+			m.flash = "not at the library · " + u.URL
+		}
 	case "h":
-		if m.recCursor < n && m.recPicks[m.recCursor].From != "" {
-			return m.openHardcover(m.recPicks[m.recCursor].From, forYouScreen)
+		from := ""
+		if m.recCursor < len(m.recPicks) {
+			from = m.recPicks[m.recCursor].From
+		} else if u, ok := m.elsewhereAt(m.recCursor); ok {
+			from = u.From
+		}
+		if from != "" {
+			return m.openHardcover(from, forYouScreen)
 		}
 	}
 	m.recCursor = max(0, min(m.recCursor, n-1))
@@ -185,6 +221,39 @@ func (m Model) viewForYou() string {
 		lines = append(lines, cursorRow(i == m.recCursor, bookLine(p.Bib, w, "", pickWhere(p))))
 		why := strings.Join(p.Reasons, " · ")
 		lines = append(lines, "    "+dimStyle.Render(ansi.Truncate(why, max(10, w-4), "…")))
+	}
+	if !m.recLoading {
+		i := len(m.recPicks)
+		section := func(title string, us []recommend.Elsewhere, where func(recommend.Elsewhere) (string, string)) {
+			if len(us) == 0 {
+				return
+			}
+			lines = append(lines, "", "  "+headingStyle.Render(title))
+			for _, u := range us {
+				if i == m.recCursor {
+					cursorLine = len(lines)
+				}
+				b := u.Bib
+				if b.ID == "" {
+					b = bc.Bib{Title: u.Title, Authors: []string{u.Author}}
+				}
+				status, detail := where(u)
+				lines = append(lines, cursorRow(i == m.recCursor, bookLine(b, w, "", status)),
+					"    "+dimStyle.Render(ansi.Truncate(detail+" · "+u.Reason, max(10, w-4), "…")))
+				i++
+			}
+		}
+		section("HARDCOVER RECOMMENDS · AT THE LIBRARY, NOT ON THE SHELF NOW", m.recProfile.NotOnShelf,
+			func(u recommend.Elsewhere) (string, string) {
+				if u.Bib.Summary.Available > 0 {
+					return okStyle.Render("other branches"), u.Status()
+				}
+				return warnStyle.Render("checked out"), u.Status() + " · enter for branches and holds"
+			})
+		section("HARDCOVER RECOMMENDS · NOT AT THE LIBRARY, TO BUY", m.recProfile.ToBuy,
+			func(u recommend.Elsewhere) (string, string) {
+				return accentStyle.Render("to buy"), u.URL
+			})
 	}
 	if len(m.recProfile.UpNext) > 0 && !m.recLoading {
 		lines = append(lines, "", "  "+headingStyle.Render("UP NEXT IN YOUR SERIES, NOT AVAILABLE NOW"))

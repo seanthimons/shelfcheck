@@ -1,6 +1,10 @@
 package recommend
 
-import "testing"
+import (
+	"testing"
+
+	bc "shelfcheck/internal/bibliocommons"
+)
 
 func TestSubtitlesClash(t *testing.T) {
 	cases := []struct {
@@ -19,6 +23,25 @@ func TestSubtitlesClash(t *testing.T) {
 	for _, c := range cases {
 		if got := subtitlesClash(c.catTitle, c.sub, c.title); got != c.clash {
 			t.Errorf("subtitlesClash(%q, %q, %q) = %v, want %v", c.catTitle, c.sub, c.title, got, c.clash)
+		}
+	}
+}
+
+func TestElsewhereStatus(t *testing.T) {
+	cases := []struct {
+		u    Elsewhere
+		want string
+	}{
+		{Elsewhere{}, "not at the library"},
+		{Elsewhere{Bib: bc.Bib{ID: "1", Format: "BK", Summary: bc.Summary{Available: 10, Total: 16}}}, "10 in at other branches"},
+		{Elsewhere{Bib: bc.Bib{ID: "1", Format: "BK", Summary: bc.Summary{Total: 3, Holds: 2}}}, "all 3 copies out · 2 holds"},
+		{Elsewhere{Bib: bc.Bib{ID: "1", Format: "EBOOK", Summary: bc.Summary{Total: 4}}}, "all 4 ebook copies out"},
+		{Elsewhere{Bib: bc.Bib{ID: "1", Format: "BK", Summary: bc.Summary{Total: 6, Holds: 1}}}, "all 6 copies out · 1 hold"},
+		{Elsewhere{Bib: bc.Bib{ID: "1", Format: "BK", Summary: bc.Summary{OnOrder: 2}}}, "on order"},
+	}
+	for _, c := range cases {
+		if got := c.u.Status(); got != c.want {
+			t.Errorf("Status(%+v) = %q, want %q", c.u.Bib.Summary, got, c.want)
 		}
 	}
 }

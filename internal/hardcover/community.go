@@ -18,6 +18,7 @@ import (
 // Book is a Hardcover book, with enough to find it in a library catalog.
 type Book struct {
 	ID        int
+	Slug      string
 	Title     string
 	Author    string
 	Readers   int     // Hardcover users who have it
@@ -25,13 +26,22 @@ type Book struct {
 	SeriesPos float64 // its position there; 0 if none
 }
 
+// URL is the book's page on Hardcover.
+func (b Book) URL() string {
+	if b.Slug == "" {
+		return ""
+	}
+	return "https://hardcover.app/books/" + b.Slug
+}
+
 // bookFields selects what Book needs.
-const bookFields = `id title users_count compilation
+const bookFields = `id slug title users_count compilation
   contributions(limit: 1) { author { name } }
   featured_book_series { position series { name } }`
 
 type rawBook struct {
 	ID            int    `json:"id"`
+	Slug          string `json:"slug"`
 	Title         string `json:"title"`
 	UsersCount    int    `json:"users_count"`
 	Compilation   bool   `json:"compilation"`
@@ -49,7 +59,7 @@ type rawBook struct {
 }
 
 func (r rawBook) book() Book {
-	b := Book{ID: r.ID, Title: r.Title, Readers: r.UsersCount}
+	b := Book{ID: r.ID, Slug: r.Slug, Title: r.Title, Readers: r.UsersCount}
 	if len(r.Contributions) > 0 {
 		b.Author = r.Contributions[0].Author.Name
 	}

@@ -5,7 +5,38 @@ import (
 	"fmt"
 
 	"shelfcheck/internal/account"
+	"shelfcheck/internal/hardcover"
 )
+
+// maxElsewhere caps each of the not-on-the-shelf and to-buy lists.
+const maxElsewhere = 12
+
+// elsewhere files a pick that isn't available now: under not on the shelf
+// if the library has it, else under to buy.
+func (e *engine) elsewhere(ctx context.Context, b hardcover.Book, reason, from string) error {
+	if len(e.notOnShelf) >= maxElsewhere && len(e.toBuy) >= maxElsewhere {
+		return nil
+	}
+	k := account.WorkKey(b.Title, b.Author)
+	for _, u := range append(append([]Elsewhere{}, e.notOnShelf...), e.toBuy...) {
+		if account.WorkKey(u.Title, u.Author) == k {
+			return nil // already listed, from the other vibe
+		}
+	}
+	bib, ok, err := e.owned(ctx, b)
+	if err != nil {
+		return err
+	}
+	u := Elsewhere{Title: b.Title, Author: b.Author, Reason: reason, From: from, URL: b.URL(), Bib: bib}
+	switch {
+	case ok && len(e.notOnShelf) < maxElsewhere:
+		e.notOnShelf = append(e.notOnShelf, u)
+	case !ok && len(e.toBuy) < maxElsewhere:
+		e.toBuy = append(e.toBuy, u)
+	}
+	e.opts.Debug("    not available now; the library has it: %v", ok)
+	return nil
+}
 
 // vibes checks the catalog for Hardcover's own picks for the patron: its
 // "recommendations" vibe (from their reading history) and "top-picks"
@@ -62,6 +93,11 @@ func (e *engine) vibes(ctx context.Context) error {
 			found, err := e.findTitle(ctx, b.Title, b.Author, "vibe", score, reason)
 			if err != nil {
 				return err
+			}
+			if len(found) == 0 {
+				if err := e.elsewhere(ctx, b, reason, v.URL()); err != nil {
+					return err
+				}
 			}
 			for _, p := range found {
 				if p.From == "" {

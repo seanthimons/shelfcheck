@@ -108,12 +108,53 @@ type Profile struct {
 	// UpNext lists the next book in active series when it isn't available
 	// now (checked out, not owned, or not out yet).
 	UpNext []UpNext
+	// NotOnShelf are Hardcover's picks for the patron the library has but
+	// not available now; ToBuy are ones it doesn't have at all.
+	NotOnShelf []Elsewhere
+	ToBuy      []Elsewhere
 	// Seeds are the liked books whose readers' co-picks were looked up.
 	Seeds   []string
 	Series  []SeriesTaste
 	Authors []AuthorTaste
 	Genres  []GenreTaste
 	Read    int
+}
+
+// Elsewhere is a recommended book that can't be had the way picks can: the
+// library has it, but not on the shelf at home or as an ebook to borrow
+// now (Bib is its record), or it doesn't have it at all (Bib is zero).
+type Elsewhere struct {
+	Title  string
+	Author string
+	Reason string
+	From   string // the Hardcover source behind Reason, as a URL
+	URL    string // the book on Hardcover
+	Bib    bc.Bib
+}
+
+// Status says where a library copy stands, from its record's summary:
+// "3 in at other branches", "all 4 checked out · 2 holds", "on order".
+func (u Elsewhere) Status() string {
+	s := u.Bib.Summary
+	what := "copies"
+	if u.Bib.Digital || account.DigitalFormats[u.Bib.Format] {
+		what = "ebook copies"
+	}
+	switch {
+	case u.Bib.ID == "":
+		return "not at the library"
+	case s.Available > 0:
+		return fmt.Sprintf("%d in at other branches", s.Available)
+	case s.Total == 0 && s.OnOrder > 0:
+		return "on order"
+	case s.Holds == 1:
+		return fmt.Sprintf("all %d %s out · 1 hold", s.Total, what)
+	case s.Holds > 1:
+		return fmt.Sprintf("all %d %s out · %d holds", s.Total, what, s.Holds)
+	case s.Total > 0:
+		return fmt.Sprintf("all %d %s out", s.Total, what)
+	}
+	return "not available now"
 }
 
 type UpNext struct {
@@ -293,6 +334,7 @@ func Recommend(ctx context.Context, client *bc.Client, rec *account.Record, opts
 	}
 	picks := e.ranked()
 	prof.UpNext, prof.Seeds = e.upNext, e.seeds
+	prof.NotOnShelf, prof.ToBuy = e.notOnShelf, e.toBuy
 	progress("done", picks)
 	if len(errs) > 0 && len(picks) == 0 {
 		return nil, prof, fmt.Errorf("recommend: %s", strings.Join(errs, "; "))
@@ -309,6 +351,8 @@ type engine struct {
 	upNext []UpNext
 	seeds  []string
 	picked int // co-picks found in the catalog
+
+	notOnShelf, toBuy []Elsewhere
 	// ahead holds works further along a series than the patron's next
 	// book (from Hardcover), which other stages shouldn't suggest.
 	ahead map[string]bool
@@ -520,17 +564,10 @@ func (e *engine) findTitle(ctx context.Context, title, author, kind string, scor
 	if err != nil {
 		return nil, err
 	}
-	want := account.AuthorKey(author)
 	var found []*Pick
 	for _, b := range res.Bibs {
-		if len(b.Authors) == 0 || account.AuthorKey(b.Authors[0]) != want {
+		if !sameBook(b, title, author) {
 			continue
-		}
-		if account.WorkKey(b.Title, b.Authors[0]) != account.WorkKey(title, author) && !account.SameTitle(b.Title, title) {
-			continue
-		}
-		if subtitlesClash(b.Title, b.Subtitle, title) {
-			continue // "Mistborn: Secret History" isn't "Mistborn: The Final Empire"
 		}
 		if p := e.add(b, kind, score, reason); p != nil {
 			found = append(found, p)
@@ -538,6 +575,61 @@ func (e *engine) findTitle(ctx context.Context, title, author, kind string, scor
 	}
 	e.opts.Debug("    catalog: %d results, %d matched", len(res.Bibs), len(found))
 	return found, nil
+}
+
+// sameBook reports whether a catalog record is the book with this title
+// and author (from Hardcover, say).
+func sameBook(b bc.Bib, title, author string) bool {
+	if len(b.Authors) == 0 || account.AuthorKey(b.Authors[0]) != account.AuthorKey(author) {
+		return false
+	}
+	if account.WorkKey(b.Title, b.Authors[0]) != account.WorkKey(title, author) && !account.SameTitle(b.Title, title) {
+		return false
+	}
+	return !subtitlesClash(b.Title, b.Subtitle, title) // "Mistborn: Secret History" isn't "Mistborn: The Final Empire"
+}
+
+// owned finds the library's record for a book that isn't available now,
+// preferring print; ok is false if the library doesn't have it. A series
+// book the title search misses is looked for by author and place in the
+// series, which catches regional titles ("Harry Potter and the
+// Philosopher's Stone" is the library's "Sorcerer's Stone").
+func (e *engine) owned(ctx context.Context, hb hardcover.Book) (bc.Bib, bool, error) {
+	search := func(text string, typ bc.SearchType, match func(bc.Bib) bool) (bc.Bib, bool, error) {
+		q := bc.Query{Text: text, Type: typ}
+		q.Toggle(bc.FacetFormat, "BK")
+		q.Toggle(bc.FacetFormat, "EBOOK")
+		if e.opts.Language != "" {
+			q.Toggle(bc.FacetLanguage, e.opts.Language)
+		}
+		res, err := e.client.Search(ctx, q, 1)
+		if err != nil {
+			return bc.Bib{}, false, err
+		}
+		var best bc.Bib
+		ok := false
+		for _, b := range res.Bibs {
+			if !match(b) {
+				continue
+			}
+			if !ok || (best.Digital || account.DigitalFormats[best.Format]) && !(b.Digital || account.DigitalFormats[b.Format]) {
+				best, ok = b, true
+			}
+		}
+		return best, ok, nil
+	}
+	bib, ok, err := search(shortTitle(hb.Title), bc.Title, func(b bc.Bib) bool { return sameBook(b, hb.Title, hb.Author) })
+	if ok || err != nil || hb.Series == "" || hb.SeriesPos == 0 {
+		return bib, ok, err
+	}
+	want := seriesKey(hb.Series)
+	return search(hb.Author, bc.Author, func(b bc.Bib) bool {
+		if len(b.Authors) == 0 || account.AuthorKey(b.Authors[0]) != account.AuthorKey(hb.Author) {
+			return false
+		}
+		order, in := bibSeriesOrder(b, want)
+		return in && order == hb.SeriesPos
+	})
 }
 
 // subtitlesClash reports whether a catalog record's subtitle (its own field,
