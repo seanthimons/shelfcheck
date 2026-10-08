@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/libby"
 )
 
 const jsonUsage = `usage: shelfcheck json <command> [flags] [args]
@@ -26,6 +28,8 @@ commands:
   history                     your borrowing history, newest first    (needs shelfcheck login)
   checkouts                   your current loans, incl. Libby/OverDrive (needs shelfcheck login)
   holds                       your holds, incl. Libby/OverDrive        (needs shelfcheck login)
+  libby                       your Libby tags: borrowed, sampled, wishlists (needs shelfcheck libby link)
+  wishlist                    which "want to read" titles are on the shelf at -home now (needs libby link)
 
 Run "shelfcheck json <command> -h" for a command's flags.
 `
@@ -47,6 +51,10 @@ func jsonCmd(args []string) error {
 		err = jsonBranches(ctx, args[1:])
 	case "history", "checkouts", "holds":
 		err = jsonPatron(ctx, args[0], args[1:])
+	case "libby":
+		err = jsonLibby(ctx, args[1:])
+	case "wishlist":
+		err = jsonWishlist(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], jsonUsage)
 	}
@@ -500,6 +508,212 @@ func jsonPatron(ctx context.Context, what string, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	return writeJSON(out)
+}
+
+// --- libby ------------------------------------------------------------------
+
+type libbyTagOut struct {
+	Name        string          `json:"name"`
+	Kind        string          `json:"kind,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Count       int             `json:"count"`
+	Titles      []libbyTitleOut `json:"titles"`
+}
+
+type libbyTitleOut struct {
+	Title    string   `json:"title"`
+	Author   string   `json:"author,omitempty"`
+	Format   string   `json:"format,omitempty"`
+	Tagged   string   `json:"tagged,omitempty"`
+	Subjects []string `json:"subjects,omitempty"`
+	LibbyID  string   `json:"libby_id"`
+}
+
+func jsonLibby(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("json libby", flag.ContinueOnError)
+	only := fs.String("tag", "", `only this tag, by name or kind ("borrowed", "sampled", "notify-me", "want to read")`)
+	subjects := fs.Bool("subjects", true, "include Libby's subject labels")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	saved, err := libby.Load(libbyPath())
+	if err != nil {
+		return err
+	}
+	c := libby.New(saved.Identity)
+	tags, err := c.Tags(ctx)
+	if err != nil {
+		return err
+	}
+	out := struct {
+		Tags []libbyTagOut `json:"tags"`
+	}{Tags: []libbyTagOut{}}
+	for _, t := range tags {
+		if *only != "" && !strings.EqualFold(*only, t.Name) && !strings.EqualFold(*only, t.Kind) {
+			continue
+		}
+		to := libbyTagOut{Name: t.Name, Kind: t.Kind, Description: t.Description, Count: t.Total, Titles: []libbyTitleOut{}}
+		if t.Total > 0 {
+			items, err := c.Taggings(ctx, t)
+			if err != nil {
+				return fmt.Errorf("tag %q: %w", t.Name, err)
+			}
+			for _, it := range items {
+				lo := libbyTitleOut{Title: it.Title, Author: it.Author, Format: it.Format, LibbyID: it.TitleID}
+				if !it.Tagged.IsZero() {
+					lo.Tagged = it.Tagged.Format("2006-01-02")
+				}
+				if *subjects {
+					lo.Subjects = it.Subjects
+				}
+				to.Titles = append(to.Titles, lo)
+			}
+		}
+		out.Tags = append(out.Tags, to)
+	}
+	if *only != "" && len(out.Tags) == 0 {
+		return fmt.Errorf("no tag named %q", *only)
+	}
+	return writeJSON(out)
+}
+
+// --- wishlist ---------------------------------------------------------------
+
+type wishOut struct {
+	Title   string    `json:"title"`
+	Author  string    `json:"author,omitempty"`
+	Tagged  string    `json:"tagged,omitempty"`
+	OnShelf bool      `json:"on_shelf_at_home"`
+	Matches []bookOut `json:"matches,omitempty"`
+}
+
+var (
+	seriesSuffixRe = regexp.MustCompile(`,\s*\d+$`)
+	nonWordRe      = regexp.MustCompile(`[^\p{L}\p{N}]+`)
+)
+
+// wishQuery trims what trips up catalog title search: series numbers
+// ("..., 1") and subtitles.
+func wishQuery(title string) string {
+	t := seriesSuffixRe.ReplaceAllString(title, "")
+	if i := strings.IndexAny(t, ":;("); i > 3 {
+		t = t[:i]
+	}
+	return strings.TrimSpace(t)
+}
+
+// authorKey is the first author's last name, lowercased, for matching
+// Libby's "Last, First" against the catalog's.
+func authorKey(a string) string {
+	a = strings.Split(a, ";")[0]
+	last, _, _ := strings.Cut(a, ",")
+	return strings.ToLower(strings.TrimSpace(nonWordRe.ReplaceAllString(last, " ")))
+}
+
+// normTitle lowercases a title, reduces punctuation to single spaces and
+// drops a leading article.
+func normTitle(t string) string {
+	t = strings.TrimSpace(nonWordRe.ReplaceAllString(strings.ToLower(t), " "))
+	for _, a := range []string{"the ", "a ", "an "} {
+		t = strings.TrimPrefix(t, a)
+	}
+	return t
+}
+
+// sameTitle reports whether a catalog title names the same book as a Libby
+// title. Libby runs subtitles into the title ("Cadillac Desert The American
+// West...") while the catalog keeps them separate, so the catalog title must
+// equal the Libby title or be a whole-word prefix of it. A longer catalog
+// title ("Skyward Flight" for "Skyward") is a different book.
+func sameTitle(catalog, libbyTitle string) bool {
+	c, l := normTitle(catalog), normTitle(seriesSuffixRe.ReplaceAllString(libbyTitle, ""))
+	return c != "" && (c == l || strings.HasPrefix(l, c+" "))
+}
+
+func jsonWishlist(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("json wishlist", flag.ContinueOnError)
+	var o options
+	o.registerCatalog(fs)
+	tagName := fs.String("tag", "want to read", "Libby tag to check")
+	var formats listFlag
+	fs.Var(&formats, "format", "catalog formats to accept (default book, large-print)")
+	all := fs.Bool("all", false, "list every title, not just the ones on the shelf")
+	lang := fs.String("lang", "eng", `catalog language code to accept ("" for any)`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if len(formats) == 0 {
+		formats = listFlag{"book", "large-print"}
+	}
+	saved, err := libby.Load(libbyPath())
+	if err != nil {
+		return err
+	}
+	lc := libby.New(saved.Identity)
+	tags, err := lc.Tags(ctx)
+	if err != nil {
+		return err
+	}
+	var tag *libby.Tag
+	for i := range tags {
+		if strings.EqualFold(tags[i].Name, *tagName) || strings.EqualFold(tags[i].Kind, *tagName) {
+			tag = &tags[i]
+		}
+	}
+	if tag == nil {
+		return fmt.Errorf("no Libby tag named %q", *tagName)
+	}
+	items, err := lc.Taggings(ctx, *tag)
+	if err != nil {
+		return err
+	}
+
+	client := bc.New(o.library)
+	out := []wishOut{}
+	for _, it := range items {
+		if it.Format != "" && it.Format != "book" {
+			continue // magazines etc. have no print copy to find
+		}
+		w := wishOut{Title: it.Title, Author: it.Author}
+		if !it.Tagged.IsZero() {
+			w.Tagged = it.Tagged.Format("2006-01-02")
+		}
+		q := bc.Query{Text: wishQuery(it.Title), Type: bc.Title}
+		q.Toggle(bc.FacetStatus, o.home)
+		if *lang != "" {
+			q.Toggle(bc.FacetLanguage, *lang)
+		}
+		for _, f := range formats {
+			code, ok := formatAliases[strings.ToLower(f)]
+			if !ok {
+				code = strings.ToUpper(f)
+			}
+			q.Toggle(bc.FacetFormat, code)
+		}
+		res, err := client.Search(ctx, q, 1)
+		if err != nil {
+			return fmt.Errorf("searching %q: %w", it.Title, err)
+		}
+		want := authorKey(it.Author)
+		for _, b := range res.Bibs {
+			if !sameTitle(b.Title, it.Title) {
+				continue // same author, different book
+			}
+			for _, a := range b.Authors {
+				if want != "" && authorKey(a) == want {
+					bo := newBookOut(o.library, b)
+					bo.Description, bo.Subjects, bo.ISBNs = "", nil, nil
+					w.Matches = append(w.Matches, bo)
+					break
+				}
+			}
+		}
+		w.OnShelf = len(w.Matches) > 0
+		if w.OnShelf || *all {
+			out = append(out, w)
+		}
 	}
 	return writeJSON(out)
 }

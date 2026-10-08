@@ -46,6 +46,8 @@ func main() {
 			run = jsonCmd
 		case "login":
 			run = loginCmd
+		case "libby":
+			run = libbyCmd
 		}
 		if run != nil {
 			if err := run(os.Args[2:]); err != nil {
