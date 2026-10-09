@@ -88,7 +88,7 @@ type kittyMsg struct{ afterResize bool }
 
 // wantPlacement is where the selected book's jacket should be now.
 func (m Model) wantPlacement() placement {
-	if m.coverMode != CoverKitty || m.screen != detailScreen || m.showHelp {
+	if m.coverMode != CoverKitty || m.screen != detailScreen || m.showHelp || m.hcEdit.active {
 		return placement{}
 	}
 	c := m.covers[m.coverURL()]

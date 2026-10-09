@@ -55,6 +55,9 @@ func (m Model) View() tea.View {
 	case hardcoverScreen:
 		body = m.viewHardcover()
 	}
+	if m.hcEdit.active {
+		body = m.viewHCEditor()
+	}
 	body = lipgloss.NewStyle().Height(m.bodyHeight()).MaxHeight(m.bodyHeight()).Render(body)
 	if m.showHelp {
 		body = m.overlay(body, m.viewHelp())

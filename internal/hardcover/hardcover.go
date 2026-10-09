@@ -1,4 +1,4 @@
-// Package hardcover is a small read-only client for the Hardcover GraphQL
+// Package hardcover is a small client for the Hardcover GraphQL
 // API (https://api.hardcover.app/v1/graphql), used for series order and
 // community book data.
 package hardcover

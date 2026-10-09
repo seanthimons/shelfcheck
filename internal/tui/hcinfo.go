@@ -151,9 +151,19 @@ func (m Model) renderHardcover(w int, desc bool) []string {
 	}
 	if ub, ok := m.hcLib[in.ID]; ok {
 		facts = append(facts, accentStyle.Render("on your "+ub.Status.String()+" shelf"))
+		if ub.Rating != 0 {
+			facts = append(facts, fmt.Sprintf("your rating: %.1f ★", ub.Rating))
+		}
 	}
 	if len(facts) > 0 {
 		out = append(out, wrap.Render(strings.Join(facts, dimStyle.Render(" · "))))
+	}
+	if ub, ok := m.hcLib[in.ID]; ok && ub.Review != "" {
+		if ub.ReviewHasSpoilers {
+			out = append(out, dimStyle.Render("Your review contains spoilers (e to edit)"))
+		} else {
+			out = append(out, wrap.Render(dimStyle.Render("Your review: ")+ub.Review))
+		}
 	}
 	if in.Series != "" {
 		s := in.Series

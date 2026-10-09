@@ -85,6 +85,7 @@ type Model struct {
 	// hcinfo.go. hcLib is the patron's Hardcover library, once loaded.
 	hcInfo map[string]*hcInfo
 	hcLib  map[int]hardcover.UserBook
+	hcEdit hcEditor
 
 	covers    map[string]*cover // jackets by URL; see cover.go
 	coverMode Covers
@@ -269,6 +270,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp.SetWidth(max(1, m.width-2)) // leaves room for the scrollbar
 		m.vp.SetHeight(m.bodyHeight())
 		m.clampScroll()
+		if m.hcEdit.active {
+			m.resizeHCEditor()
+		}
 		if m.screen == detailScreen {
 			m.refreshDetail()
 		}
@@ -352,6 +356,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case recProgressMsg, recDoneMsg:
 		return m.handleRecMsg(msg)
 
+	case hcEditLoadedMsg:
+		return m.handleHCEditLoaded(msg)
+	case hcEditSavedMsg:
+		return m.handleHCEditSaved(msg)
+
 	case hcInfoMsg:
 		return m.handleHCInfo(msg)
 
@@ -367,6 +376,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+		if m.hcEdit.active {
+			return m.updateHCEditor(msg)
 		}
 		m.flash = ""
 		if m.showHelp {
@@ -398,6 +410,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.hcEdit.active {
+		return m.updateHCEditor(msg)
+	}
 	if m.screen == searchScreen {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -488,6 +503,8 @@ func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "e":
+		return m.openHCEditor()
 	case "q":
 		return m, tea.Quit
 	case "esc", "backspace", "left", "h":

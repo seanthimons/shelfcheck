@@ -184,6 +184,9 @@ func kb(keys, desc string) key.Binding {
 // screenKeys are the current screen's keys, most useful first: the footer
 // shows as many as fit, and ? shows them all.
 func (m Model) screenKeys() []key.Binding {
+	if m.hcEdit.active {
+		return []key.Binding{kb("ctrl+s", "save"), kb("tab", "next field"), kb("shift+tab", "previous field"), kb("esc", "cancel")}
+	}
 	nav := []key.Binding{kb("p", "for you"), kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}
 	switch m.screen {
 	case searchScreen:
@@ -207,6 +210,9 @@ func (m Model) screenKeys() []key.Binding {
 		return append(append(ks, kb("a", "home only"), kb("o", "sort")), nav...)
 	case detailScreen:
 		ks := []key.Binding{kb("↑↓", "scroll"), kb("esc", "back")}
+		if h := m.hcInfo[m.detailKey()]; h != nil && h.ok {
+			ks = append(ks, kb("e", "edit Hardcover"))
+		}
 		if m.selected.ID != "" {
 			ks = append(ks, kb("r", "refresh"))
 		}
@@ -250,7 +256,7 @@ func (m Model) viewFooter() string {
 	h.Styles.ShortKey, h.Styles.ShortDesc = footKeyStyle, footDescStyle
 	h.Styles.ShortSeparator, h.Styles.Ellipsis = footDescStyle, footDescStyle
 	more := ""
-	if m.screen != searchScreen {
+	if m.screen != searchScreen && !m.hcEdit.active {
 		more = h.ShortHelpView(globalKeys[1:2]) // ? all keys
 	}
 	h.SetWidth(max(0, rest-lipgloss.Width(more)-3))
