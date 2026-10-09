@@ -1,5 +1,7 @@
 # Editing a Hardcover record
 
+[TUI guide](tui.md) · [CLI and account setup](cli.md)
+
 Set `HARDCOVER_TOKEN` in the environment or your private shelfcheck
 `credentials.env` file. Open a book's detail screen and press `e` once its
 Hardcover match has loaded. The book must already be in your Hardcover library.
@@ -12,6 +14,16 @@ The editor fetches your current record before making changes:
 - Reviews accept multiple lines and Markdown. An empty review requests removal.
 - Ctrl+S saves changed fields. Esc discards the draft before saving.
 
+Available statuses are Want to Read, Currently Reading, Read, Paused, Did Not
+Finish, and Ignored. On the status field, Left/Up moves backward and
+Right/Down/Space/Enter moves forward. On the spoiler field, Space, Enter, Left,
+or Right toggles the flag. Enter in the review inserts a new line.
+
+The editor owns letter keys, including `q`, `p`, `w`, `m`, and `t`, so you can
+type ordinary review text. Ctrl+C still quits the application. Once you press
+Ctrl+S, Esc cannot cancel the request already sent to Hardcover; wait for the
+response before making further edits. A successful save closes the editor.
+
 While saving, the editor waits for Hardcover's response. Successful saves update
 book details and Hardcover shelf markers; wishlist and recommendation data reload
 when you next open those screens. Reviews marked as containing spoilers are
@@ -23,21 +35,18 @@ Some fields may already have saved when an error appears. If a connection fails
 or the response can't confirm the update, reopen the editor to load the current
 record before retrying.
 
-## Verification before closing issue #3
+## Checking a change and recovering from errors
 
-Automated coverage uses a local fake GraphQL server and tests editing, validation,
-partial requests, missing records, rejected/ignored writes, cancellation, and
-cache invalidation. Run `go test ./...` and `go vet ./...`.
+After saving, reopen the editor to load the current server record. For important
+changes, check the same book on Hardcover too. Shelfcheck sends only changed
+fields; upstream service behavior can still affect the resulting record.
 
-A live check remains necessary with a designated test book/account:
+If you see a validation error, correct the rating and press Ctrl+S again. If
+Hardcover rejects or ignores a field, read the error and inspect the saved
+values before retrying. If a network error leaves the outcome unclear, press
+Esc and reopen the editor rather than assuming nothing saved. You may want to
+copy your review draft before leaving after an error.
 
-1. Save a rating, review, spoiler flag, and status; reopen the editor and verify
-   the values on Hardcover too.
-2. Edit only the review and confirm rating, status, dates, and privacy remain
-   unchanged. Check whether rating changes cause any upstream status changes.
-3. Clear the rating and review; confirm whether Hardcover applies those requests
-   or shelfcheck displays an ignored-field error.
-4. Cancel a draft and confirm nothing was written. Try an expired token and
-   confirm the draft remains available after a failed save.
-
-No live account records are changed by the automated tests.
+This editor updates existing records. To add a new book, add it on Hardcover
+first, or use `+` from a [Hardcover collection](tui.md#hardcover-prompts-lists-and-vibes)
+to add it to Want to Read.
