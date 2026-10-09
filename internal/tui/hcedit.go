@@ -92,6 +92,7 @@ func (m Model) handleHCEditLoaded(msg hcEditLoadedMsg) (Model, tea.Cmd) {
 	e.review.CharLimit = 0
 	e.review.Placeholder = "Write your review…"
 	e.review.SetValue(msg.entry.Review)
+	m.styleHCEditor()
 	m.resizeHCEditor()
 	m.cacheHCEntry(msg.entry)
 	m.refreshDetail()
