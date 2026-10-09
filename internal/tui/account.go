@@ -15,9 +15,8 @@ import (
 	"shelfcheck/internal/libby"
 )
 
-// The account screen (m) shows loans, holds and recent history from the
-// logged-in catalog session; the wishlist screen (w) checks the Libby
-// "want to read" tag against the catalog one title at a time.
+// The account workspace lives in account_workspace.go. This file shares
+// navigation, wishlist checking and row formatting across account screens.
 
 const recentCount = 10
 
@@ -41,12 +40,6 @@ type (
 		err  error
 	}
 )
-
-// acctRow is one selectable line on the account screen.
-type acctRow struct {
-	bib  bc.Bib
-	line func(width int) string
-}
 
 // --- navigation -------------------------------------------------------------
 
@@ -116,144 +109,6 @@ func (m Model) openBib(b bc.Bib, from screen) (tea.Model, tea.Cmd) {
 }
 
 // --- account ----------------------------------------------------------------
-
-func (m Model) openAccount() (Model, tea.Cmd) {
-	m.screen = accountScreen
-	m.input.Blur()
-	if m.acct == nil || !m.acct.HasCatalog() || m.acctLoading || m.acctLoaded {
-		return m, nil
-	}
-	return m.loadAccount()
-}
-
-func (m Model) loadAccount() (Model, tea.Cmd) {
-	m.acctLoading = true
-	m.acctErr = nil
-	client, st := m.client, m.acct
-	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		var msg accountMsg
-		msg.err = st.WithSession(ctx, client, func(s *bc.Session) error {
-			var err error
-			if msg.checkouts, err = client.Checkouts(ctx, s); err != nil {
-				return err
-			}
-			if msg.holds, err = client.Holds(ctx, s); err != nil {
-				return err
-			}
-			hist, err := client.History(ctx, s)
-			msg.recent = hist[:min(recentCount, len(hist))]
-			return err
-		})
-		if msg.err == nil {
-			msg.checkouts, msg.holds, msg.libbyErr = st.WithLibby(ctx, msg.checkouts, msg.holds)
-		}
-		return msg
-	}
-}
-
-func (m Model) acctRows() []acctRow {
-	var rows []acctRow
-	for _, c := range m.checkouts {
-		c := c
-		rows = append(rows, acctRow{c.Bib, func(w int) string {
-			due := dueIn(c.Due)
-			if c.Status == "OVERDUE" {
-				due = errStyle.Render("overdue · " + c.Due)
-			}
-			return bookLine(c.Bib, w, kindLabel(c.Bib, c.Digital), due)
-		}})
-	}
-	for _, h := range m.holds {
-		h := h
-		rows = append(rows, acctRow{h.Bib, func(w int) string {
-			return bookLine(h.Bib, w, kindLabel(h.Bib, h.Digital), holdStatus(h))
-		}})
-	}
-	for _, r := range m.recent {
-		r := r
-		rows = append(rows, acctRow{r.Bib, func(w int) string {
-			return bookLine(r.Bib, w, formatLabel(r.Bib.Format), dimStyle.Render("borrowed "+shortDate(r.CheckedOut)))
-		}})
-	}
-	return rows
-}
-
-func (m Model) updateAccount(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	rows := m.acctRows()
-	switch msg.String() {
-	case "q":
-		return m, tea.Quit
-	case "esc", "/", "s":
-		return m, m.toSearch()
-	case "r":
-		if !m.acctLoading && m.acct != nil {
-			return m.loadAccount()
-		}
-	case "up", "k":
-		m.acctCursor--
-	case "down", "j":
-		m.acctCursor++
-	case "home", "g":
-		m.acctCursor = 0
-	case "end", "G":
-		m.acctCursor = len(rows) - 1
-	case "enter", "right", "l":
-		if m.acctCursor < len(rows) {
-			b := rows[m.acctCursor].bib
-			if b.ID == "" {
-				// From Libby, with no catalog record: show it from Hardcover.
-				return m.openBook(b.Title, firstOr(b.Authors, ""), 0, accountScreen)
-			}
-			return m.openBib(b, accountScreen)
-		}
-	}
-	m.acctCursor = max(0, min(m.acctCursor, len(rows)-1))
-	return m, nil
-}
-
-func (m Model) viewAccount() string {
-	switch {
-	case m.acct == nil || !m.acct.HasCatalog():
-		return m.notice(titleStyle.Render("Your account isn't set up here.") +
-			"\n\nPut your card number and PIN in ~/.config/shelfcheck/credentials.env\n(SHELFCHECK_CARD=… and SHELFCHECK_PIN=…), then run: shelfcheck login")
-	case m.acctLoading && !m.acctLoaded:
-		return m.notice(m.spin.View() + " Loading your loans and holds…")
-	case m.acctErr != nil && !m.acctLoaded:
-		return m.notice(errStyle.Render("Couldn't load your account: "+m.acctErr.Error()) + "\n\nPress r to try again.")
-	}
-	w := max(20, m.width-4)
-	rows := m.acctRows()
-	var out []string
-	i := 0
-	section := func(title string, n int, empty string) {
-		out = append(out, "", "  "+sectionHead(title, dimStyle.Render(fmt.Sprintf(" (%d)", n)), w))
-		if n == 0 {
-			out = append(out, dimStyle.Render("    "+empty))
-		}
-		for j := 0; j < n; j, i = j+1, i+1 {
-			out = append(out, cursorRow(i == m.acctCursor, rows[i].line(w)))
-		}
-	}
-	if m.libbyErr != nil {
-		out = append(out, "", "  "+errStyle.Render("Libby loans and holds missing: "+m.libbyErr.Error()))
-	}
-	section("CHECKED OUT", len(m.checkouts), "Nothing checked out.")
-	section("HOLDS", len(m.holds), "No holds.")
-	section("RECENTLY BORROWED", len(m.recent), "No borrowing history.")
-
-	// Scroll so the cursor's line stays visible.
-	cursorLine := 0
-	for n, l := range out {
-		if strings.Contains(l, "▸ ") {
-			cursorLine = n
-		}
-	}
-	h := m.bodyHeight()
-	start := max(0, min(cursorLine-h/2, len(out)-h))
-	return strings.Join(withScrollbar(out[start:], scrollbar(h, len(out), start), m.width), "\n")
-}
 
 // --- wishlist ---------------------------------------------------------------
 

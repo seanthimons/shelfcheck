@@ -4,7 +4,9 @@
 
 Set `HARDCOVER_TOKEN` in the environment or your private shelfcheck
 `credentials.env` file. Open a book's detail screen and press `e` once its
-Hardcover match has loaded. The book must already be in your Hardcover library.
+Hardcover match has loaded. You can also open Account (`m`), select a Hardcover shelf, focus its books,
+and press `e` on a row to open the editor directly. Saving or canceling returns
+to the account list. The book must already be in your Hardcover library.
 
 The editor fetches your current record before making changes:
 

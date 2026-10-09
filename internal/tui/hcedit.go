@@ -67,8 +67,13 @@ func (m Model) openHCEditor() (Model, tea.Cmd) {
 		m.flash = "No matching book found on Hardcover; r retries the lookup"
 		return m, nil
 	}
+	return m.openHCEditorFor(h.info.ID)
+}
+
+// openHCEditorFor opens a known Hardcover book directly from an account shelf.
+func (m Model) openHCEditorFor(id int) (Model, tea.Cmd) {
 	m.hcEdit = hcEditor{active: true, loading: true, seq: m.hcEdit.seq + 1}
-	hc, id, seq := m.acct.HardcoverClient(), h.info.ID, m.hcEdit.seq
+	hc, seq := m.acct.HardcoverClient(), m.hcEdit.seq
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
@@ -155,6 +160,9 @@ func (m Model) updateHCEditor(msg tea.Msg) (Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		if key.String() == "esc" && !e.saving {
 			e.active = false
+			if m.screen == accountScreen && !m.hcLibraryLoaded {
+				return m.openAccount()
+			}
 			return m, nil
 		}
 		if e.loading || e.saving || e.original.UserBookID == 0 {
@@ -255,7 +263,12 @@ func (m Model) handleHCEditSaved(msg hcEditSavedMsg) (Model, tea.Cmd) {
 	m.recPicks, m.recErr = nil, nil
 	m.recProfile = recommend.Profile{}
 	m.recCursor = 0
+	m.clampAccountCursor()
 	if msg.err != nil {
+		// A failed update may have changed fields. Reload the shelf snapshot
+		// once the retained editor draft is dismissed.
+		m.hcLibrarySeq++
+		m.hcLibraryLoading, m.hcLibraryLoaded = false, false
 		m.hcEdit.err = msg.err
 		m.refreshDetail()
 		return m, nil

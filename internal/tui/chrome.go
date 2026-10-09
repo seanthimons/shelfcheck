@@ -218,8 +218,14 @@ func (m Model) screenKeys() []key.Binding {
 		}
 		return append(append(ks, kb("c", "search catalog")), nav...)
 	case accountScreen:
-		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("r", "refresh"),
-			kb("p", "for you"), kb("w", "wishlist"), kb("/", "search")}
+		if m.accountUI.filtering {
+			return []key.Binding{kb("enter", "apply filter"), kb("esc", "cancel")}
+		}
+		ks := []key.Binding{kb("↑↓", "move"), kb("tab", "switch pane"), kb("enter", "open"), kb("r", "refresh")}
+		if m.accountUI.section >= accountAllBooks {
+			ks = append(ks, kb("e", "edit"), kb("f", "filter"), kb("o", "sort"))
+		}
+		return append(ks, kb("pgup/pgdown", "page"), kb("h", "sections"), kb("/", "search"), kb("esc", "search"))
 	case forYouScreen:
 		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("h", "Hardcover source"), kb("r", "refresh"),
 			kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}

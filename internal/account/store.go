@@ -55,12 +55,12 @@ func (s *Store) HasCatalog() bool {
 	if os.Getenv("SHELFCHECK_CARD") != "" {
 		return true
 	}
-	for _, p := range []string{s.Session, s.Credentials} {
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
+	if _, err := os.Stat(s.Session); err == nil {
+		return true
 	}
-	return false
+	// A credentials file may contain only a Hardcover token.
+	vals, err := s.envFile()
+	return err == nil && (vals["SHELFCHECK_CARD"] != "" || vals["SHELFCHECK_PIN"] != "")
 }
 
 // HasLibby reports whether a Libby link is saved.

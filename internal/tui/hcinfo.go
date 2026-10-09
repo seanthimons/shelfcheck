@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -89,18 +88,10 @@ func (m Model) fetchHCInfoWithRefresh(refresh bool) (Model, tea.Cmd) {
 func (m Model) handleHCInfo(msg hcInfoMsg) (Model, tea.Cmd) {
 	m.hcInfo[msg.key] = &hcInfo{ok: msg.ok, info: msg.info, err: msg.err}
 	var cmds []tea.Cmd
-	if msg.err == nil && msg.ok && !m.hcLibraryLoaded && !m.hcLibraryLoading && m.acct != nil {
-		if hc := m.acct.HardcoverClient(); hc != nil {
-			m.hcLibraryLoading = true
-			m.hcLibrarySeq++
-			seq := m.hcLibrarySeq
-			cmds = append(cmds, func() tea.Msg {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-				defer cancel()
-				lib, err := hc.Library(ctx)
-				return hcLibraryMsg{seq: seq, lib: hardcover.Shelves(lib), err: err}
-			})
-		}
+	if msg.err == nil && msg.ok && !m.hcLibraryLoaded && !m.hcLibraryLoading {
+		var cmd tea.Cmd
+		m, cmd = m.loadAccountHardcover(false)
+		cmds = append(cmds, cmd)
 	}
 	if m.screen == detailScreen && m.detailKey() == msg.key {
 		m.refreshDetail()
@@ -114,10 +105,12 @@ func (m Model) handleHCLibrary(msg hcLibraryMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.hcLibraryLoading = false
+	m.hcLibraryErr = msg.err
 	if msg.err == nil {
 		m.hcLib = msg.lib
 		m.hcLibraryLoaded = true
 	}
+	m.clampAccountCursor()
 	if m.screen == detailScreen {
 		m.refreshDetail()
 	}

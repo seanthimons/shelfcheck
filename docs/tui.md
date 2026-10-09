@@ -134,9 +134,17 @@ These views use the local account setup described in
 Libby device linking (`shelfcheck libby link <code>`), and `HARDCOVER_TOKEN`.
 Restart the TUI after changing credentials or linking an account.
 
-- **Account** (`m`) requires a catalog login. It shows loans, holds, and the 10
-  most recent history entries, adding current Libby loans and holds when linked. `r`
-  reloads the account. Libby-only books can open Hardcover-based details.
+- **Account** (`m`) opens a workspace with a section sidebar and book list.
+  Overview combines current loans, holds, and Hardcover's Currently Reading
+  shelf. Library & Libby sections show loans and holds with due dates, queue
+  positions, and Libby wait estimates where supplied. Borrowing history shows
+  the 10 most recent library entries; it is separate from Hardcover's Read shelf.
+  Hardcover sections include All books and all six reading statuses, with your
+  ratings and dates. Each integration works independently, including Hardcover
+  without a catalog login and Libby-only loans and holds. A source failure leaves
+  other sources visible with an error note; `r` retries the selected section's
+  sources. Hardcover shelves show all your books without catalog availability
+  filtering. Enter opens details; `c` there searches the catalog.
 - **Wishlist** (`w`) combines Libby's "want to read" tag and Hardcover's Want
   to Read shelf. It checks each title and initially shows physical copies on
   your home shelf or ebooks available now. `A` switches between available and
@@ -154,9 +162,19 @@ The first recommendation run can take a while; the progress message shows
 which source is being checked. Lists fill as checks finish. Source failures may
 leave partial results with a visible error or count of failed checks.
 
+Account uses Tab / Shift+Tab to switch focus between sections and books.
+Up/`k` and Down/`j` move within the focused pane; Enter/Right/`l` enters the book
+list or opens the selected book. Left/`h` focuses sections. Each section remembers
+its book selection. Narrow terminals show a section picker instead of the sidebar.
+On a Hardcover shelf, `f` edits a title/author filter (Enter applies, Esc cancels),
+`o` cycles Recently added, Title, Author, Rating, and Last read, and `e` opens the
+selected record's editor directly. Filters and sort are remembered per shelf
+within the session; ordinary shortcut letters are text while editing a filter.
+Editing from the account list returns to that list after saving or canceling.
+
 All three views support Up/`k`, Down/`j`, Home/`g`, End/`G`, and
-Enter/Right/`l` to open a row. Wishlist and For you also support PageUp and
-PageDown/Space. Account has no page-jump binding. Esc, `/`, or `s` returns to
+Enter/Right/`l` to open a row. They also support PageUp and PageDown/Space while
+browsing books. Esc, `/`, or `s` returns to
 Search. For you's "up next in your series" notes are informational; search the
 title to see holds and availability.
 

@@ -50,6 +50,13 @@ func mergeLibby(cos []bc.Checkout, holds []bc.Hold, loans []libby.Loan, lholds [
 			Status: "OUT", Digital: true})
 	}
 	for _, h := range lholds {
+		// Catalog digital holds often duplicate Libby, but omit its wait estimate.
+		for i := range holds {
+			existing := &holds[i]
+			if existing.Digital && WorkKey(existing.Bib.Title, firstAuthor(existing.Bib.Authors)) == WorkKey(h.Title, h.Author) {
+				existing.WaitDays = h.WaitDays
+			}
+		}
 		if have[WorkKey(h.Title, h.Author)] {
 			continue
 		}
@@ -61,7 +68,7 @@ func mergeLibby(cos []bc.Checkout, holds []bc.Hold, loans []libby.Loan, lholds [
 			status = "SUSPENDED"
 		}
 		holds = append(holds, bc.Hold{Bib: libbyBib(h.Title, h.Author, h.Format), Status: status, Position: h.Position,
-			Placed: date(h.Placed), Digital: true})
+			Placed: date(h.Placed), WaitDays: h.WaitDays, Digital: true})
 	}
 	return cos, holds
 }

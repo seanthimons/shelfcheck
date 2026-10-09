@@ -88,6 +88,7 @@ type Model struct {
 	hcEdit                            hcEditor
 	hcLibraryLoaded, hcLibraryLoading bool
 	hcLibrarySeq                      int
+	hcLibraryErr                      error
 
 	covers    map[string]*cover // jackets by URL; see cover.go
 	coverMode Covers
@@ -104,6 +105,7 @@ type Model struct {
 	holds       []bc.Hold
 	recent      []bc.HistoryItem
 	acctCursor  int
+	accountUI   accountWorkspace
 
 	wishSeq     int
 	wishLoading bool
@@ -344,11 +346,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case accountMsg:
 		m.acctLoading = false
 		m.acctErr = msg.err
-		if msg.err == nil {
+		m.libbyErr = msg.libbyErr
+		if msg.err == nil || len(msg.checkouts)+len(msg.holds)+len(msg.recent) > 0 {
 			m.acctLoaded = true
 			m.checkouts, m.holds, m.recent = msg.checkouts, msg.holds, msg.recent
 			m.libbyErr = msg.libbyErr
-			m.acctCursor = min(m.acctCursor, max(0, len(m.acctRows())-1))
+			m.clampAccountCursor()
 		}
 		return m, nil
 
@@ -386,6 +389,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHCEditor(msg)
 		}
 		m.flash = ""
+		if m.screen == accountScreen && m.accountUI.filtering {
+			return m.updateAccount(msg)
+		}
 		if m.showHelp {
 			m.showHelp = false
 			return m, nil
