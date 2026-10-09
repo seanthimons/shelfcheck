@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"math"
 	"net/http"
@@ -26,71 +28,163 @@ const (
 	coverMaxH = 14 // rows; taller jackets are squeezed
 )
 
-// cover is a jacket drawn for the detail page, by its URL. loading until the
-// image arrives; then lines is nil if there's no usable picture.
+// cover is a jacket drawn for the detail page, by its URL. It's loading
+// until the image arrives; then it has half-block lines, or for kitty
+// graphics a base64 PNG to fill rows rows (pxH pixels tall), or neither if
+// there's no usable picture.
 type cover struct {
 	loading bool
 	lines   []string
+
+	png       string
+	rows, pxH int
+	id        int  // the terminal's ID for the image
+	sent      bool // the terminal has it
 }
 
 type coverMsg struct {
 	url   string
 	lines []string
+	png   string
+	rows  int
+	pxH   int
 }
 
 // fetchCover loads the jacket at url, if it hasn't been.
 func (m Model) fetchCover(url string) tea.Cmd {
-	if url == "" || m.covers[url] != nil {
+	if url == "" || m.covers[url] != nil || m.coverMode == CoverOff {
 		return nil
 	}
 	m.covers[url] = &cover{loading: true}
-	hc := m.client.HTTP
+	hc, kitty := m.client.HTTP, m.coverMode == CoverKitty
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return coverMsg{url: url}
+		if kitty {
+			// The catalog's large jacket (266×400 to the medium's 133×200),
+			// to shrink rather than stretch.
+			big := strings.Replace(url, "/MC.GIF", "/LC.GIF", 1)
+			img := getImage(hc, big)
+			if img == nil && big != url {
+				img = getImage(hc, url)
+			}
+			return kittyCover(url, img)
 		}
-		resp, err := hc.Do(req)
-		if err != nil {
-			return coverMsg{url: url}
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return coverMsg{url: url}
-		}
-		img, _, err := image.Decode(io.LimitReader(resp.Body, 4<<20))
-		if err != nil {
+		img := getImage(hc, url)
+		if img == nil {
 			return coverMsg{url: url}
 		}
 		return coverMsg{url: url, lines: halfBlocks(img, coverW)}
 	}
 }
 
-func (m Model) handleCover(msg coverMsg) (Model, tea.Cmd) {
-	m.covers[msg.url] = &cover{lines: msg.lines}
-	if m.screen == detailScreen && m.selected.CoverURL == msg.url {
-		m.refreshDetail()
+// getImage downloads and decodes an image, or returns nil.
+func getImage(hc *http.Client, url string) image.Image {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
 	}
-	return m, nil
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	img, _, err := image.Decode(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil
+	}
+	return img
 }
 
-// coverLines is the selected book's jacket, blank while it loads; nil if it
-// has none.
+// kittyCover sizes img to the cells it will cover, when the terminal says
+// how big they are, so it isn't scaled again there.
+func kittyCover(url string, img image.Image) coverMsg {
+	if img == nil || halfBlocks(img, coverW) == nil {
+		return coverMsg{url: url} // too small, or the flat gray stand-in
+	}
+	b := img.Bounds()
+	cw, ch := cellPixels()
+	if cw == 0 || ch == 0 {
+		cw, ch = 1, 2 // a guess at the shape, for the rows
+	}
+	rows := min(coverMaxH, max(2, int(math.Round(float64(coverW*cw*b.Dy())/float64(b.Dx()*ch)))))
+	if cw > 1 {
+		img = toRGBA(shrink(img, coverW*cw, rows*ch), coverW*cw, rows*ch)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return coverMsg{url: url}
+	}
+	return coverMsg{url: url, png: base64.StdEncoding.EncodeToString(buf.Bytes()), rows: rows, pxH: img.Bounds().Dy()}
+}
+
+func toRGBA(px [][3]uint8, w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i, p := range px {
+		o := i * 4
+		img.Pix[o], img.Pix[o+1], img.Pix[o+2], img.Pix[o+3] = p[0], p[1], p[2], 255
+	}
+	return img
+}
+
+func (m Model) handleCover(msg coverMsg) (Model, tea.Cmd) {
+	c := &cover{lines: msg.lines, png: msg.png, rows: msg.rows, pxH: msg.pxH}
+	if c.png != "" {
+		m.kitty.nextID++
+		c.id = m.kitty.nextID
+	}
+	m.covers[msg.url] = c
+	if m.screen != detailScreen {
+		return m, nil
+	}
+	m.refreshDetail()
+	return m, m.fetchCover(m.coverURL()) // Hardcover's, if that was the catalog's stand-in
+}
+
+// coverURL is the jacket to show for the selected book: the catalog's, or
+// Hardcover's when the catalog has none (for some records it sends a 1×1
+// stand-in) or there's no catalog record.
+func (m Model) coverURL() string {
+	if u := m.selected.CoverURL; u != "" {
+		if c := m.covers[u]; c == nil || c.loading || c.lines != nil || c.png != "" {
+			return u
+		}
+	}
+	if h := m.hcInfo[m.detailKey()]; h != nil && h.ok {
+		return h.info.CoverURL
+	}
+	return ""
+}
+
+// coverLines is the selected book's jacket, or blank cells for one coming
+// or drawn by the terminal over them; nil if it has none.
 func (m Model) coverLines() []string {
-	c := m.covers[m.selected.CoverURL]
+	if m.coverMode == CoverOff {
+		return nil
+	}
+	c := m.covers[m.coverURL()]
+	rows := 0
 	switch {
 	case c == nil:
-		return nil
-	case c.loading:
-		blank := make([]string, coverW*3/4)
-		for i := range blank {
-			blank[i] = strings.Repeat(" ", coverW)
+		if h := m.hcInfo[m.detailKey()]; h == nil || !h.loading {
+			return nil
 		}
-		return blank
+		rows = coverW * 3 / 4 // Hardcover may have one
+	case c.loading:
+		rows = coverW * 3 / 4
+	case c.png != "":
+		rows = c.rows
+	default:
+		return c.lines
 	}
-	return c.lines
+	blank := make([]string, rows)
+	for i := range blank {
+		blank[i] = strings.Repeat(" ", coverW)
+	}
+	return blank
 }
 
 // halfBlocks draws img w cells wide. It returns nil for images too small or

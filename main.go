@@ -11,9 +11,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/BurntSushi/toml"
 
 	"shelfcheck/internal/account"
 	"shelfcheck/internal/bibliocommons"
@@ -87,7 +89,13 @@ func main() {
 
 	var o options
 	o.register(flag.CommandLine)
+	coversFlag := flag.String("covers", "", `book jackets: kitty (sharp, in Konsole, kitty and Ghostty), blocks (half blocks, in any true-color terminal), off, or auto, which picks kitty when the terminal is one of those and not inside tmux (default $SHELFCHECK_COVERS, else covers in config.toml, else auto)`)
 	flag.Parse()
+	covers, err := tui.PickCovers(firstSet(*coversFlag, os.Getenv("SHELFCHECK_COVERS"), savedCovers()), os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "shelfcheck:", err)
+		os.Exit(1)
+	}
 
 	themes, cur, err := pickTheme(o.theme)
 	if err != nil {
@@ -98,9 +106,27 @@ func main() {
 
 	client := bibliocommons.New(o.library)
 	m := tui.New(client, o.home, !o.anywhere, strings.Join(flag.Args(), " "), account.DefaultStore(configDir()))
-	m = m.WithThemes(themes, cur, func(name string) error { return theme.Save(configDir(), name) })
+	m = m.WithThemes(themes, cur, func(name string) error { return theme.Save(configDir(), name) }).WithCovers(covers)
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "shelfcheck:", err)
 		os.Exit(1)
 	}
+}
+
+// savedCovers is the covers setting in config.toml, if any.
+func savedCovers() string {
+	var c struct {
+		Covers string `toml:"covers"`
+	}
+	_, _ = toml.DecodeFile(filepath.Join(configDir(), "config.toml"), &c)
+	return c.Covers
+}
+
+func firstSet(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

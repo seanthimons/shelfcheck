@@ -21,6 +21,7 @@ type BookInfo struct {
 	ReadBy      int      // readers who've read it
 	Genres      []string // most-tagged first
 	Moods       []string
+	CoverURL    string // its cover image, if it has one
 }
 
 // HasRating reports whether readers have rated it.
@@ -29,7 +30,7 @@ func (b BookInfo) HasRating() bool { return b.Ratings > 0 && b.Rating > 0 }
 const bookInfoQuery = `query($id: Int!) {
   books_by_pk(id: $id) {
     ` + bookFields + `
-    subtitle description release_year pages rating ratings_count users_read_count cached_tags
+    subtitle description release_year pages rating ratings_count users_read_count cached_tags cached_image
     authors: contributions(where: {_or: [{contribution: {_is_null: true}}, {contribution: {_eq: "Author"}}]}) { author { name } }
   }
 }`
@@ -48,7 +49,10 @@ func (c *Client) Info(ctx context.Context, id int) (BookInfo, bool, error) {
 			Ratings     int                        `json:"ratings_count"`
 			ReadBy      int                        `json:"users_read_count"`
 			Tags        map[string]json.RawMessage `json:"cached_tags"`
-			Authors     []struct {
+			Image       *struct {
+				URL string `json:"url"`
+			} `json:"cached_image"`
+			Authors []struct {
 				Author struct {
 					Name string `json:"name"`
 				} `json:"author"`
@@ -70,6 +74,9 @@ func (c *Client) Info(ctx context.Context, id int) (BookInfo, bool, error) {
 		return strings.TrimSpace(*s)
 	}
 	info.Subtitle, info.Description = deref(r.Subtitle), deref(r.Description)
+	if r.Image != nil {
+		info.CoverURL = r.Image.URL
+	}
 	if r.Year != nil {
 		info.Year = *r.Year
 	}

@@ -86,6 +86,7 @@ func (m Model) handleHCInfo(msg hcInfoMsg) (Model, tea.Cmd) {
 	}
 	if m.screen == detailScreen && m.detailKey() == msg.key {
 		m.refreshDetail()
+		return m, m.fetchCover(m.coverURL())
 	}
 	return m, nil
 }
@@ -104,7 +105,7 @@ func (m Model) openBook(title, author string, hcID int, from screen) (tea.Model,
 	m, cmd := m.fetchHCInfo()
 	m.refreshDetail()
 	m.vp.GotoTop()
-	return m, cmd
+	return m, tea.Batch(cmd, m.fetchCover(m.coverURL()))
 }
 
 // searchSelected searches the catalog for the selected book by title, for

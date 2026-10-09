@@ -290,25 +290,35 @@ func (m Model) renderDetail() string {
 	var out []string
 	add := func(lines ...string) { out = append(out, lines...) }
 
-	if b.ID == "" {
-		// No library record: Hardcover is all there is.
-		title, meta := m.hcHeader()
-		add("", wrap.Render(titleStyle.Render(title)))
-		if meta != "" {
-			add(wrap.Render(meta))
-		}
-		add("", dimStyle.Render("No record at the library here · c searches the catalog for it (other titles, holds)"))
-		add(m.renderHardcover(w, true)...)
-		add("")
-		return indent(strings.Join(out, "\n"), 2)
-	}
-
 	// The title block sits beside the jacket, if there is one.
 	jacket := m.coverLines()
 	head := wrap
 	if jacket != nil {
 		head = lipgloss.NewStyle().Width(max(10, w-coverW-2))
 	}
+	beside := func(top []string) {
+		add("")
+		if jacket != nil {
+			add(lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(jacket, "\n"), "  ", strings.Join(top, "\n")))
+		} else {
+			add(top...)
+		}
+	}
+
+	if b.ID == "" {
+		// No library record: Hardcover is all there is.
+		title, meta := m.hcHeader()
+		top := []string{head.Render(titleStyle.Render(title))}
+		if meta != "" {
+			top = append(top, head.Render(meta))
+		}
+		top = append(top, "", head.Render(dimStyle.Render("No record at the library here · c searches the catalog for it (other titles, holds)")))
+		beside(top)
+		add(m.renderHardcover(w, true)...)
+		add("")
+		return indent(strings.Join(out, "\n"), 2)
+	}
+
 	var top []string
 	title := b.Title
 	if b.Subtitle != "" {
@@ -334,12 +344,7 @@ func (m Model) renderDetail() string {
 	if len(b.Series) > 0 {
 		top = append(top, head.Render(dimStyle.Render("Series: ")+strings.Join(b.Series, "; ")))
 	}
-	add("")
-	if jacket != nil {
-		add(lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(jacket, "\n"), "  ", strings.Join(top, "\n")))
-	} else {
-		add(top...)
-	}
+	beside(top)
 
 	if !side {
 		add("")
@@ -611,7 +616,7 @@ func stars(v float64) string {
 }
 
 func dueLabel(t time.Time) string {
-	today := time.Now().Truncate(24 * time.Hour)
+	today := startOfToday()
 	if t.Before(today) {
 		return "overdue (" + t.Format("Jan 2") + ")"
 	}

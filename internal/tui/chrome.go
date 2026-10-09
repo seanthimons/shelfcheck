@@ -44,7 +44,7 @@ func (m Model) viewHeader() string {
 	if current == detailScreen {
 		current = m.backScreen
 	}
-	left := sigilStyle.Render("shelfcheck") + "   "
+	left := sigilStyle.Render("shelfcheck") + dimStyle.Render(" "+buildStamp) + "   "
 	onX, onW := -1, 0
 	for i, t := range m.navTabs() {
 		if i > 0 {
@@ -58,10 +58,10 @@ func (m Model) viewHeader() string {
 		}
 	}
 
-	// Drop the build stamp, then the home branch, when they don't fit.
+	// Drop the library, then the home branch, when they don't fit.
 	home := dimStyle.Render("home: ") + m.homeName
 	var right string
-	for _, r := range []string{dimStyle.Render(buildStamp+" · "+m.client.Library+"   ") + home, home, ""} {
+	for _, r := range []string{dimStyle.Render(m.client.Library+"   ") + home, home, ""} {
 		if lipgloss.Width(left)+lipgloss.Width(r)+2 <= m.width {
 			right = r
 			break

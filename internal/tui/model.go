@@ -86,7 +86,9 @@ type Model struct {
 	hcInfo map[string]*hcInfo
 	hcLib  map[int]hardcover.UserBook
 
-	covers map[string]*cover // jackets by URL; see cover.go
+	covers    map[string]*cover // jackets by URL; see cover.go
+	coverMode Covers
+	kitty     *kittyState // where kitty graphics put a jacket; see kitty.go
 
 	// Account and wishlist screens; see account.go. acct is nil when the
 	// patron's files aren't available (e.g. over SSH).
@@ -186,6 +188,7 @@ func New(client *bc.Client, home string, homeOnly bool, query string, acct *acco
 		detailsErr:   map[string]error{},
 		hcInfo:       map[string]*hcInfo{},
 		covers:       map[string]*cover{},
+		kitty:        &kittyState{},
 		vp:           viewport.New(),
 		spin:         spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(accentStyle)),
 	}
@@ -250,6 +253,15 @@ func (m Model) fetchLocations() tea.Cmd {
 // --- update -----------------------------------------------------------------
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	mm := next.(Model)
+	if sync := mm.syncCover(msg); sync != nil {
+		cmd = tea.Batch(cmd, sync)
+	}
+	return mm, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -345,6 +357,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case coverMsg:
 		return m.handleCover(msg)
+
+	case kittyMsg:
+		return m, m.placeCover(msg)
 
 	case hcCollectionMsg, hcCheckedMsg, hcShelvedMsg:
 		return m.handleHardcoverMsg(msg)

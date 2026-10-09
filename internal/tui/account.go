@@ -108,7 +108,7 @@ func (m Model) openBib(b bc.Bib, from screen) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.fetchDetails(id))
 	}
 	m, hcCmd := m.fetchHCInfo()
-	cmds = append(cmds, hcCmd, m.fetchCover(b.CoverURL))
+	cmds = append(cmds, hcCmd, m.fetchCover(m.coverURL()))
 	m.refreshDetail()
 	m.vp.GotoTop()
 	return m, tea.Batch(cmds...)
@@ -567,7 +567,7 @@ func dueIn(date string) string {
 	if err != nil {
 		return date
 	}
-	today := time.Now().Truncate(24 * time.Hour)
+	today := startOfToday()
 	days := int(t.Sub(today).Hours()/24 + 0.5)
 	label := "due " + t.Format("Jan 2")
 	switch {
@@ -590,4 +590,11 @@ func shortDate(date string) string {
 		return t.Format("Jan 2")
 	}
 	return t.Format("Jan 2006")
+}
+
+// startOfToday is local midnight. (Truncating to a day works in UTC, which
+// is tomorrow here by evening.)
+func startOfToday() time.Time {
+	y, mo, d := time.Now().Date()
+	return time.Date(y, mo, d, 0, 0, 0, 0, time.Local)
 }

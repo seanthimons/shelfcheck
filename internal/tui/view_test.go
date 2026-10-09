@@ -2,17 +2,21 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"strings"
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"shelfcheck/internal/account"
 
 	bc "shelfcheck/internal/bibliocommons"
+	"shelfcheck/internal/hardcover"
 	"shelfcheck/internal/theme"
 )
 
@@ -181,3 +185,106 @@ type boundedImage struct {
 }
 
 func (b *boundedImage) Bounds() image.Rectangle { return b.r }
+
+func TestPickCovers(t *testing.T) {
+	env := func(kv ...string) func(string) string {
+		return func(k string) string {
+			for i := 0; i < len(kv); i += 2 {
+				if kv[i] == k {
+					return kv[i+1]
+				}
+			}
+			return ""
+		}
+	}
+	for _, c := range []struct {
+		setting string
+		env     func(string) string
+		want    Covers
+	}{
+		{"", env("KONSOLE_VERSION", "260801"), CoverKitty},
+		{"auto", env("TERM", "xterm-kitty"), CoverKitty},
+		{"", env("TERM_PROGRAM", "ghostty"), CoverKitty},
+		{"", env("KONSOLE_VERSION", "260801", "TMUX", "/tmp/tmux-1000/default,1,0"), CoverBlocks},
+		{"", env("TERM", "xterm-256color"), CoverBlocks}, // over SSH, say
+		{"kitty", env(), CoverKitty},
+		{"OFF", env("KONSOLE_VERSION", "260801"), CoverOff},
+	} {
+		if got, err := PickCovers(c.setting, c.env); err != nil || got != c.want {
+			t.Errorf("PickCovers(%q) = %v, %v; want %v", c.setting, got, err, c.want)
+		}
+	}
+	if _, err := PickCovers("sixel", env()); err == nil {
+		t.Error("PickCovers accepted sixel")
+	}
+}
+
+// TestKittyPlacement follows the escapes as the detail page opens, scrolls
+// the jacket partly off the top, and closes.
+func TestKittyPlacement(t *testing.T) {
+	m := New(bc.New("x"), "1", false, "", nil).WithCovers(CoverKitty)
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = mm.(Model)
+	b := bc.Bib{ID: "a", Title: "A Book", CoverURL: "u", Description: strings.Repeat("Words go here. ", 300)}
+	m.covers["u"] = &cover{png: "QUJD", rows: 12, pxH: 240}
+	m, _ = m.handleCover(coverMsg{url: "u", png: "QUJD", rows: 12, pxH: 240})
+
+	// step delivers the pending placement, if any, and returns its escapes.
+	step := func(msg tea.Msg) string {
+		t.Helper()
+		next, _ := m.Update(msg)
+		m = next.(Model)
+		var out string
+		if m.kitty.pending {
+			next, cmd := m.Update(kittyMsg{})
+			m = next.(Model)
+			if cmd != nil {
+				out = fmt.Sprint(cmd().(tea.RawMsg).Msg)
+			}
+		}
+		return out
+	}
+
+	next, _ := m.openBib(b, resultsScreen)
+	m = next.(Model)
+	out := step(spinner.TickMsg{})
+	if !strings.Contains(out, "a=t,t=d,f=100,i=1,q=2,m=0;QUJD") {
+		t.Errorf("first placement didn't send the image: %q", out)
+	}
+	if !strings.Contains(out, "\x1b7\x1b[4;3H\x1b_Ga=p,i=1,p=1,y=0,h=240,c=16,r=12,C=1,q=2\x1b\\\x1b8") {
+		t.Errorf("jacket not placed at row 4, column 3: %q", out)
+	}
+
+	m.vp.SetYOffset(3) // the top two of its rows scroll off
+	out = step(spinner.TickMsg{})
+	if strings.Contains(out, "a=t") || !strings.Contains(out, "\x1b[3;3H\x1b_Ga=p,i=1,p=1,y=40,h=200,c=16,r=10,") {
+		t.Errorf("scrolled jacket not cropped and moved: %q", out)
+	}
+
+	if out := step(tea.KeyPressMsg{Code: tea.KeyEscape}); out != "\x1b_Ga=d,d=i,i=1,p=1,q=2\x1b\\" {
+		t.Errorf("leaving the page: %q, want the jacket deleted", out)
+	}
+}
+
+func TestCoverFallsBackToHardcover(t *testing.T) {
+	m := New(bc.New("x"), "1", false, "", nil)
+	m.selected = bc.Bib{ID: "a", CoverURL: "catalog"}
+	m.hcInfo["a"] = &hcInfo{ok: true, info: hardcover.BookInfo{CoverURL: "hardcover"}}
+	m.covers["catalog"] = &cover{loading: true}
+	if got := m.coverURL(); got != "catalog" {
+		t.Errorf("while the catalog's loads: %q, want it", got)
+	}
+	m.covers["catalog"] = &cover{lines: []string{"▀"}}
+	if got := m.coverURL(); got != "catalog" {
+		t.Errorf("with the catalog's: %q, want it", got)
+	}
+	m.covers["catalog"] = &cover{} // its 1×1 stand-in
+	if got := m.coverURL(); got != "hardcover" {
+		t.Errorf("without the catalog's: %q, want Hardcover's", got)
+	}
+	m.selected = bc.Bib{Title: "Not here"}
+	m.hcInfo[m.detailKey()] = &hcInfo{ok: true, info: hardcover.BookInfo{CoverURL: "hc2"}}
+	if got := m.coverURL(); got != "hc2" {
+		t.Errorf("with no catalog record: %q, want Hardcover's", got)
+	}
+}
