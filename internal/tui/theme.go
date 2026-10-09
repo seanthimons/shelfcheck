@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -101,6 +103,40 @@ func (m Model) theme() theme.Theme {
 	return theme.Theme{Name: theme.Terminal}
 }
 
+// styleHCEditor replaces widget defaults with the app's palette in both
+// focus states. The current review line keeps the same readable colors.
+func (m *Model) styleHCEditor() {
+	if m.hcEdit.original.UserBookID == 0 {
+		return
+	}
+	t := m.theme()
+	text := lipgloss.NewStyle()
+	if t.FG != "" {
+		text = text.Foreground(lipgloss.Color(t.FG))
+	}
+	if t.BG != "" {
+		text = text.Background(lipgloss.Color(t.BG))
+	}
+	muted := dimStyle.Inherit(text)
+	review := m.hcEdit.review.Styles()
+	state := textarea.StyleState{
+		Base: text, Text: text, CursorLine: text,
+		LineNumber: muted, CursorLineNumber: accentStyle.Inherit(text),
+		EndOfBuffer: muted, Placeholder: muted, Prompt: accentStyle.Inherit(text),
+		Selection: text.Reverse(true),
+	}
+	review.Focused, review.Blurred = state, state
+	review.Cursor.Color = accentColor
+	m.hcEdit.review.SetStyles(review)
+	rating := m.hcEdit.rating.Styles()
+	rating.Focused = textinput.StyleState{
+		Text: text, Placeholder: muted, Suggestion: muted, Prompt: accentStyle.Inherit(text),
+	}
+	rating.Blurred = rating.Focused
+	rating.Cursor.Color = accentColor
+	m.hcEdit.rating.SetStyles(rating)
+}
+
 // cycleTheme switches to the next theme and remembers it.
 func (m Model) cycleTheme() (Model, tea.Cmd) {
 	if len(m.themes) < 2 {
@@ -110,6 +146,7 @@ func (m Model) cycleTheme() (Model, tea.Cmd) {
 	t := m.themes[m.themeIdx]
 	ApplyTheme(t)
 	m.spin.Style = accentStyle
+	m.styleHCEditor()
 	if m.screen == detailScreen {
 		m.refreshDetail()
 	}

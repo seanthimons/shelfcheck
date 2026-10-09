@@ -101,7 +101,8 @@ func (m Model) handleRecMsg(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case recProgressMsg:
 		if msg.seq != m.recSeq {
-			return m, nil
+			// Continue draining superseded runs so their producer can finish.
+			return m, waitRec(msg.next)
 		}
 		m.recStage = msg.stage
 		if len(msg.picks) > 0 {

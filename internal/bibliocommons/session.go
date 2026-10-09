@@ -262,6 +262,7 @@ type Hold struct {
 	Bib      Bib
 	Status   string // "NOT_YET_AVAILABLE", "READY_FOR_PICKUP", "SUSPENDED", ...
 	Position int
+	WaitDays int    `json:",omitempty"` // Libby estimated wait; zero if unknown
 	Placed   string // YYYY-MM-DD
 	Digital  bool
 }

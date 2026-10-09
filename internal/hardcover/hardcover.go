@@ -1,4 +1,4 @@
-// Package hardcover is a small read-only client for the Hardcover GraphQL
+// Package hardcover is a small client for the Hardcover GraphQL
 // API (https://api.hardcover.app/v1/graphql), used for series order and
 // community book data.
 package hardcover
@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"shelfcheck/internal/cache"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ type Client struct {
 	// CacheDir, if set, keeps AlsoPicked results for a week: they change
 	// slowly, and Hardcover's rate limit makes them slow to gather.
 	CacheDir string
+	Disk     *cache.Store // optional override; production uses the shared SQLite cache
 
 	throttle sync.Mutex
 	last     time.Time
@@ -51,6 +53,13 @@ const minInterval = time.Second
 // Query runs a GraphQL query and decodes its data into out. When Hardcover
 // says to slow down, it waits as told and tries again, a few times.
 func (c *Client) Query(ctx context.Context, query string, vars map[string]any, out any) error {
+	if strings.HasPrefix(strings.TrimSpace(query), "mutation") {
+		defer func() {
+			invalidateCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			c.diskCache().Invalidate(invalidateCtx, c.cacheScope())
+		}()
+	}
 	for attempt := 0; ; attempt++ {
 		err := c.query(ctx, query, vars, out)
 		var rl *rateLimited

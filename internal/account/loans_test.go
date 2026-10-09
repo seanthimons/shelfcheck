@@ -16,7 +16,7 @@ func TestMergeLibby(t *testing.T) {
 		{Title: "Alien Clay", Author: "Tchaikovsky, Adrian", Format: "ebook"}, // the catalog has it
 	}
 	holds := []libby.Hold{
-		{Title: "The Vorrh", Author: "Catling, Brian", Format: "ebook", Suspended: true, Position: 1},
+		{Title: "The Vorrh", Author: "Catling, Brian", Format: "ebook", Suspended: true, Position: 1, WaitDays: 21},
 		{Title: "Hope and Help for Your Nerves", Author: "Weekes, Claire", Format: "audiobook", Ready: true},
 	}
 	gotCos, gotHolds := mergeLibby(cos, nil, loans, holds)
@@ -24,8 +24,16 @@ func TestMergeLibby(t *testing.T) {
 		gotCos[1].Bib.Format != "EBOOK" || gotCos[1].Bib.ID != "" || gotCos[1].Due != date(due) {
 		t.Errorf("checkouts = %+v", gotCos)
 	}
-	if len(gotHolds) != 2 || gotHolds[0].Status != "SUSPENDED" || gotHolds[0].Position != 1 ||
+	if len(gotHolds) != 2 || gotHolds[0].Status != "SUSPENDED" || gotHolds[0].Position != 1 || gotHolds[0].WaitDays != 21 ||
 		gotHolds[1].Status != "READY" || gotHolds[1].Bib.Format != "EAUDIOBOOK" {
 		t.Errorf("holds = %+v", gotHolds)
+	}
+}
+
+func TestMergeLibbyPreservesWaitOnCatalogHold(t *testing.T) {
+	holds := []bc.Hold{{Bib: bc.Bib{ID: "catalog-hold", Title: "James", Authors: []string{"Everett, Percival"}}, Digital: true, Position: 8}}
+	_, got := mergeLibby(nil, holds, nil, []libby.Hold{{Title: "James", Author: "Everett, Percival", WaitDays: 21}})
+	if len(got) != 1 || got[0].Bib.ID != "catalog-hold" || got[0].WaitDays != 21 {
+		t.Fatalf("holds=%+v", got)
 	}
 }

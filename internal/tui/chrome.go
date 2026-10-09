@@ -184,6 +184,9 @@ func kb(keys, desc string) key.Binding {
 // screenKeys are the current screen's keys, most useful first: the footer
 // shows as many as fit, and ? shows them all.
 func (m Model) screenKeys() []key.Binding {
+	if m.hcEdit.active {
+		return []key.Binding{kb("ctrl+s", "save"), kb("tab", "next field"), kb("shift+tab", "previous field"), kb("esc", "cancel")}
+	}
 	nav := []key.Binding{kb("p", "for you"), kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}
 	switch m.screen {
 	case searchScreen:
@@ -207,13 +210,22 @@ func (m Model) screenKeys() []key.Binding {
 		return append(append(ks, kb("a", "home only"), kb("o", "sort")), nav...)
 	case detailScreen:
 		ks := []key.Binding{kb("↑↓", "scroll"), kb("esc", "back")}
-		if m.selected.ID != "" {
+		if h := m.hcInfo[m.detailKey()]; h != nil && h.ok {
+			ks = append(ks, kb("e", "edit Hardcover"))
+		}
+		if m.selected.ID != "" || m.hcInfo[m.detailKey()] != nil {
 			ks = append(ks, kb("r", "refresh"))
 		}
 		return append(append(ks, kb("c", "search catalog")), nav...)
 	case accountScreen:
-		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("r", "refresh"),
-			kb("p", "for you"), kb("w", "wishlist"), kb("/", "search")}
+		if m.accountUI.filtering {
+			return []key.Binding{kb("enter", "apply filter"), kb("esc", "cancel")}
+		}
+		ks := []key.Binding{kb("↑↓", "move"), kb("tab", "switch pane"), kb("enter", "open"), kb("r", "refresh")}
+		if m.accountUI.section >= accountAllBooks {
+			ks = append(ks, kb("e", "edit"), kb("f", "filter"), kb("o", "sort"))
+		}
+		return append(ks, kb("pgup/pgdown", "page"), kb("h", "sections"), kb("/", "search"), kb("esc", "search"))
 	case forYouScreen:
 		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("h", "Hardcover source"), kb("r", "refresh"),
 			kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}
@@ -250,7 +262,7 @@ func (m Model) viewFooter() string {
 	h.Styles.ShortKey, h.Styles.ShortDesc = footKeyStyle, footDescStyle
 	h.Styles.ShortSeparator, h.Styles.Ellipsis = footDescStyle, footDescStyle
 	more := ""
-	if m.screen != searchScreen {
+	if m.screen != searchScreen && !m.hcEdit.active {
 		more = h.ShortHelpView(globalKeys[1:2]) // ? all keys
 	}
 	h.SetWidth(max(0, rest-lipgloss.Width(more)-3))

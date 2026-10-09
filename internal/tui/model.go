@@ -83,8 +83,12 @@ type Model struct {
 
 	// Hardcover's metadata for detail-screen books, by detailKey; see
 	// hcinfo.go. hcLib is the patron's Hardcover library, once loaded.
-	hcInfo map[string]*hcInfo
-	hcLib  map[int]hardcover.UserBook
+	hcInfo                            map[string]*hcInfo
+	hcLib                             map[int]hardcover.UserBook
+	hcEdit                            hcEditor
+	hcLibraryLoaded, hcLibraryLoading bool
+	hcLibrarySeq                      int
+	hcLibraryErr                      error
 
 	covers    map[string]*cover // jackets by URL; see cover.go
 	coverMode Covers
@@ -101,6 +105,7 @@ type Model struct {
 	holds       []bc.Hold
 	recent      []bc.HistoryItem
 	acctCursor  int
+	accountUI   accountWorkspace
 
 	wishSeq     int
 	wishLoading bool
@@ -269,6 +274,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp.SetWidth(max(1, m.width-2)) // leaves room for the scrollbar
 		m.vp.SetHeight(m.bodyHeight())
 		m.clampScroll()
+		if m.hcEdit.active {
+			m.resizeHCEditor()
+		}
 		if m.screen == detailScreen {
 			m.refreshDetail()
 		}
@@ -338,11 +346,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case accountMsg:
 		m.acctLoading = false
 		m.acctErr = msg.err
-		if msg.err == nil {
+		m.libbyErr = msg.libbyErr
+		if msg.err == nil || len(msg.checkouts)+len(msg.holds)+len(msg.recent) > 0 {
 			m.acctLoaded = true
 			m.checkouts, m.holds, m.recent = msg.checkouts, msg.holds, msg.recent
 			m.libbyErr = msg.libbyErr
-			m.acctCursor = min(m.acctCursor, max(0, len(m.acctRows())-1))
+			m.clampAccountCursor()
 		}
 		return m, nil
 
@@ -351,6 +360,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case recProgressMsg, recDoneMsg:
 		return m.handleRecMsg(msg)
+
+	case hcEditLoadedMsg:
+		return m.handleHCEditLoaded(msg)
+	case hcEditSavedMsg:
+		return m.handleHCEditSaved(msg)
+
+	case hcLibraryMsg:
+		return m.handleHCLibrary(msg)
 
 	case hcInfoMsg:
 		return m.handleHCInfo(msg)
@@ -368,7 +385,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
+		if m.hcEdit.active {
+			return m.updateHCEditor(msg)
+		}
 		m.flash = ""
+		if m.screen == accountScreen && m.accountUI.filtering {
+			return m.updateAccount(msg)
+		}
 		if m.showHelp {
 			m.showHelp = false
 			return m, nil
@@ -398,6 +421,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.hcEdit.active {
+		return m.updateHCEditor(msg)
+	}
 	if m.screen == searchScreen {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -488,6 +514,8 @@ func (m Model) updateResults(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "e":
+		return m.openHCEditor()
 	case "q":
 		return m, tea.Quit
 	case "esc", "backspace", "left", "h":
@@ -498,16 +526,22 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		return m.searchSelected()
 	case "r":
+		m.hcLibrarySeq++
+		m.hcLibraryLoading, m.hcLibraryLoaded = false, false
+		if h := m.hcInfo[m.detailKey()]; h == nil || !h.loading {
+			delete(m.hcInfo, m.detailKey())
+		}
+		m, hcCmd := m.fetchHCInfoWithRefresh(true)
 		if m.selected.ID == "" {
-			return m, nil // nothing at the library to refresh
+			return m, hcCmd
 		}
 		// The client caches availability for a minute, so this is cheap to mash.
 		if !m.availPending[m.selected.ID] {
 			m.availPending[m.selected.ID] = true
 			m.refreshDetail()
-			return m, m.fetchAvail(m.selected.ID)
+			return m, tea.Batch(hcCmd, m.fetchAvail(m.selected.ID))
 		}
-		return m, nil
+		return m, hcCmd
 	}
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)

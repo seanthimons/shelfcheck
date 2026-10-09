@@ -26,7 +26,9 @@ type Store struct {
 	Session     string // saved catalog session
 	Libby       string // saved Libby link
 
-	mu sync.Mutex // serializes logins between concurrent callers
+	mu   sync.Mutex // serializes logins between concurrent callers
+	hcMu sync.Mutex
+	hc   *hardcover.Client
 }
 
 // DefaultDir is ~/.config/shelfcheck (or the platform equivalent).
@@ -53,12 +55,12 @@ func (s *Store) HasCatalog() bool {
 	if os.Getenv("SHELFCHECK_CARD") != "" {
 		return true
 	}
-	for _, p := range []string{s.Session, s.Credentials} {
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
+	if _, err := os.Stat(s.Session); err == nil {
+		return true
 	}
-	return false
+	// A credentials file may contain only a Hardcover token.
+	vals, err := s.envFile()
+	return err == nil && (vals["SHELFCHECK_CARD"] != "" || vals["SHELFCHECK_PIN"] != "")
 }
 
 // HasLibby reports whether a Libby link is saved.
@@ -81,10 +83,16 @@ func (s *Store) HardcoverClient() *hardcover.Client {
 	if tok == "" {
 		return nil
 	}
+	s.hcMu.Lock()
+	defer s.hcMu.Unlock()
 	c := hardcover.New(tok)
+	if s.hc != nil && s.hc.Token == c.Token {
+		return s.hc
+	}
 	if dir, err := os.UserCacheDir(); err == nil {
 		c.CacheDir = filepath.Join(dir, "shelfcheck", "hardcover")
 	}
+	s.hc = c
 	return c
 }
 
