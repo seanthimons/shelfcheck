@@ -332,6 +332,13 @@ func (m Model) renderDetail() string {
 		add(dimStyle.Render("Series: ") + strings.Join(b.Series, "; "))
 	}
 
+	// Terminal hyperlinks open on the reader's machine, including over SSH.
+	// Keep the URL visible for terminals that don't support hyperlinks.
+	catalogURL := m.client.RecordURL(b.ID)
+	add("", ansi.SetHyperlink(catalogURL)+accentStyle.Underline(true).Render("Open in library catalog")+ansi.ResetHyperlink())
+	add(wrap.Render(ansi.SetHyperlink(catalogURL) + catalogURL + ansi.ResetHyperlink()))
+	add(wrap.Render(dimStyle.Render("Place a hold in your browser; choose pickup and confirm there.")))
+
 	add("")
 	add(m.renderAvailability(w)...)
 

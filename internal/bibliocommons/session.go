@@ -45,6 +45,15 @@ func (c *Client) SiteURL() string {
 	return fmt.Sprintf("https://%s.bibliocommons.com", c.Library)
 }
 
+// RecordURL links to the catalog's own interface for a specific edition.
+// Opening it lets the patron sign in and place a hold in their browser.
+func (c *Client) RecordURL(bibID string) string {
+	if bibID == "" {
+		return ""
+	}
+	return strings.TrimRight(c.SiteURL(), "/") + "/v2/record/" + url.PathEscape(bibID)
+}
+
 var (
 	loginFormRe = regexp.MustCompile(`(?s)<form[^>]*data-js="login_form"[^>]*>(.*?)</form>`)
 	inputRe     = regexp.MustCompile(`<input[^>]*>`)
