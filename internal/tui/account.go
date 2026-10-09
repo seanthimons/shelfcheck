@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -568,7 +569,7 @@ func dueIn(date string) string {
 		return date
 	}
 	today := startOfToday()
-	days := int(t.Sub(today).Hours()/24 + 0.5)
+	days := int(math.Round(t.Sub(today).Hours() / 24)) // 23 or 25 hours across a clock change
 	label := "due " + t.Format("Jan 2")
 	switch {
 	case days < 0:
@@ -595,6 +596,9 @@ func shortDate(date string) string {
 // startOfToday is local midnight. (Truncating to a day works in UTC, which
 // is tomorrow here by evening.)
 func startOfToday() time.Time {
-	y, mo, d := time.Now().Date()
+	y, mo, d := timeNow().Date()
 	return time.Date(y, mo, d, 0, 0, 0, 0, time.Local)
 }
+
+// timeNow is time.Now, for tests to set the clock.
+var timeNow = time.Now

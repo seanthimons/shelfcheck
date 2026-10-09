@@ -288,3 +288,25 @@ func TestCoverFallsBackToHardcover(t *testing.T) {
 		t.Errorf("with no catalog record: %q, want Hardcover's", got)
 	}
 }
+
+// TestDueInTheEvening pins the clock to 9 pm Eastern, when it's already
+// tomorrow in UTC: due dates once counted from UTC midnight and read a day
+// short then.
+func TestDueInTheEvening(t *testing.T) {
+	defer func(l *time.Location, f func() time.Time) { time.Local, timeNow = l, f }(time.Local, timeNow)
+	time.Local = time.FixedZone("EDT", -4*60*60)
+	timeNow = func() time.Time { return time.Date(2026, 10, 8, 21, 0, 0, 0, time.Local) }
+	for date, want := range map[string]string{
+		"2026-10-18": "due Oct 18 · 10d",
+		"2026-10-10": "due Oct 10 · 2d",
+		"2026-10-08": "due Oct 8 · today",
+		"2026-10-07": "overdue · Oct 7",
+	} {
+		if got := ansi.Strip(dueIn(date)); got != want {
+			t.Errorf("dueIn(%q) at 9 pm = %q, want %q", date, got, want)
+		}
+	}
+	if got := dueLabel(time.Date(2026, 10, 8, 12, 0, 0, 0, time.Local)); got != "Oct 8" {
+		t.Errorf("dueLabel(today) at 9 pm = %q, want Oct 8 (not overdue)", got)
+	}
+}
