@@ -20,7 +20,7 @@ func ApplyTheme(t theme.Theme) {
 	}
 	accentStyle = color(t.Active, "6")
 	accentColor = lipgloss.Color(firstOf(t.Active, "6"))
-	titleStyle = lipgloss.NewStyle().Bold(true)
+	titleStyle = accentStyle.Bold(true)
 	headingStyle = accentStyle.Bold(true)
 	tabOnStyle = accentStyle.Bold(true).Underline(true)
 	dimStyle = lipgloss.NewStyle().Faint(true)

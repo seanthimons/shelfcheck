@@ -344,6 +344,12 @@ func (m Model) renderDetail() string {
 	if len(b.Series) > 0 {
 		top = append(top, head.Render(dimStyle.Render("Series: ")+strings.Join(b.Series, "; ")))
 	}
+	// Terminal hyperlinks open on the reader's machine, including over SSH.
+	// Keep the URL visible for terminals that don't support hyperlinks.
+	catalogURL := m.client.RecordURL(b.ID)
+	top = append(top, "", ansi.SetHyperlink(catalogURL)+accentStyle.Underline(true).Render("Open in library catalog")+ansi.ResetHyperlink(),
+		head.Render(ansi.SetHyperlink(catalogURL)+catalogURL+ansi.ResetHyperlink()),
+		head.Render(dimStyle.Render("Place a hold in your browser; choose pickup and confirm there.")))
 	beside(top)
 
 	if !side {
