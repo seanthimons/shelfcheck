@@ -239,6 +239,18 @@ func (c *Client) UpdateUserBook(ctx context.Context, userBookID int, p UserBookC
 		return ub, fmt.Errorf("hardcover: update wasn't confirmed; reload the entry before retrying")
 	}
 	ub = raw.Update.Book.userBook()
+	if p.Review != nil && !sameReview(ub.Review, *p.Review) {
+		// The mutation's review can lag behind its derived Markdown. Check
+		// the persisted record before reporting that the write was ignored.
+		current, ok, err := c.UserBook(ctx, ub.ID)
+		if err != nil {
+			return ub, fmt.Errorf("hardcover: update accepted, but couldn't reload to verify the review: %w", err)
+		}
+		if !ok || current.UserBookID != userBookID {
+			return ub, fmt.Errorf("hardcover: update accepted, but the library entry wasn't found when verifying the review")
+		}
+		ub = current
+	}
 	var ignored []string
 	if p.Status != nil && ub.Status != *p.Status {
 		ignored = append(ignored, "status")
@@ -246,7 +258,7 @@ func (c *Client) UpdateUserBook(ctx context.Context, userBookID int, p UserBookC
 	if p.Rating != nil && ub.Rating != *p.Rating || p.ClearRating && ub.Rating != 0 {
 		ignored = append(ignored, "rating")
 	}
-	if p.Review != nil && ub.Review != *p.Review {
+	if p.Review != nil && !sameReview(ub.Review, *p.Review) {
 		ignored = append(ignored, "review")
 	}
 	if p.ReviewHasSpoilers != nil && ub.ReviewHasSpoilers != *p.ReviewHasSpoilers {
@@ -256,4 +268,14 @@ func (c *Client) UpdateUserBook(ctx context.Context, userBookID int, p UserBookC
 		return ub, fmt.Errorf("hardcover: didn't apply %s; other changes may have saved", strings.Join(ignored, ", "))
 	}
 	return ub, nil
+}
+
+// Hardcover may normalize line endings and whitespace around a review.
+// Keep internal formatting significant so different content still fails
+// verification, including an ignored request to clear an existing review.
+func sameReview(saved, requested string) bool {
+	normalize := func(s string) string {
+		return strings.TrimSpace(strings.ReplaceAll(s, "\r\n", "\n"))
+	}
+	return normalize(saved) == normalize(requested)
 }

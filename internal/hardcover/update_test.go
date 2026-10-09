@@ -112,11 +112,81 @@ func TestUpdateUserBookReportsRejectedOrUnconfirmedWrites(t *testing.T) {
 
 func TestUpdateUserBookReportsIgnoredReviewClear(t *testing.T) {
 	empty := ""
-	c := fakeHardcover(t, func(string, map[string]any) string {
+	c := fakeHardcover(t, func(q string, vars map[string]any) string {
+		if strings.Contains(q, "query") {
+			if vars["b"] != float64(42) {
+				t.Errorf("reload vars = %v", vars)
+			}
+			return `{"data":{"me":[{"user_books":[{"id":7,"status_id":3,"review_markdown":"Still here","book":{"id":42}}]}]}}`
+		}
 		return `{"data":{"update_user_book":{"id":7,"user_book":{"id":7,"status_id":3,"review_markdown":"Still here","book":{"id":42}}}}}`
 	})
 	ub, err := c.UpdateUserBook(context.Background(), 7, UserBookChanges{Review: &empty})
 	if err == nil || !strings.Contains(err.Error(), "didn't apply review") || ub.Review != "Still here" || ub.ID != 42 {
 		t.Fatalf("ignored update=%+v,%v", ub, err)
+	}
+}
+
+func TestUpdateReviewAcceptsNormalizedWhitespace(t *testing.T) {
+	review := "A **great** book.\r\n\r\nSecond paragraph."
+	c := fakeHardcover(t, func(q string, vars map[string]any) string {
+		if strings.Contains(q, "query") {
+			t.Fatal("normalized review unnecessarily reloaded")
+		}
+		return `{"data":{"update_user_book":{"id":7,"user_book":{"id":7,"status_id":3,"review_markdown":"A **great** book.\n\nSecond paragraph.\n","book":{"id":42}}}}}`
+	})
+	if _, err := c.UpdateUserBook(context.Background(), 7, UserBookChanges{Review: &review}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateReviewVerifiesPersistedRecord(t *testing.T) {
+	review := "New review"
+	requests := 0
+	c := fakeHardcover(t, func(q string, vars map[string]any) string {
+		requests++
+		if requests == 1 {
+			return `{"data":{"update_user_book":{"id":7,"user_book":{"id":7,"status_id":3,"review_markdown":"Old review","book":{"id":42}}}}}`
+		}
+		if vars["b"] != float64(42) || !strings.Contains(q, "me { user_books(where:") {
+			t.Fatalf("unexpected reload %s %v", q, vars)
+		}
+		return `{"data":{"me":[{"user_books":[{"id":7,"status_id":3,"review_markdown":"New review\n","book":{"id":42}}]}]}}`
+	})
+	ub, err := c.UpdateUserBook(context.Background(), 7, UserBookChanges{Review: &review})
+	if err != nil || requests != 2 || ub.Review != "New review\n" {
+		t.Fatalf("update=%+v, requests=%d, err=%v", ub, requests, err)
+	}
+}
+
+func TestUpdateReviewFailedVerificationReportsAcceptedWrite(t *testing.T) {
+	review := "New review"
+	c := fakeHardcover(t, func(q string, vars map[string]any) string {
+		if strings.Contains(q, "query") {
+			return `{"errors":[{"message":"service unavailable"}]}`
+		}
+		return `{"data":{"update_user_book":{"id":7,"user_book":{"id":7,"status_id":3,"rating":5,"review_markdown":"Old review","book":{"id":42}}}}}`
+	})
+	ub, err := c.UpdateUserBook(context.Background(), 7, UserBookChanges{Review: &review})
+	if err == nil || !strings.Contains(err.Error(), "update accepted") || !strings.Contains(err.Error(), "couldn't reload") || ub.Rating != 5 {
+		t.Fatalf("update=%+v,err=%v", ub, err)
+	}
+}
+
+func TestReviewComparisonPreservesContentDifferences(t *testing.T) {
+	for _, tc := range []struct {
+		saved, requested string
+		same             bool
+	}{
+		{"text\n", "text", true},
+		{"text\r\n\r\nmore\n", "text\n\nmore", true},
+		{"old", "new", false},
+		{"still here", "", false},
+		{"paragraph\n\nmore", "paragraph\nmore", false},
+		{"two  spaces", "two spaces", false},
+	} {
+		if got := sameReview(tc.saved, tc.requested); got != tc.same {
+			t.Errorf("sameReview(%q,%q)=%v", tc.saved, tc.requested, got)
+		}
 	}
 }
