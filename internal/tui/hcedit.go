@@ -50,8 +50,21 @@ func (m Model) openHCEditor() (Model, tea.Cmd) {
 		m.flash = "Set HARDCOVER_TOKEN to edit your Hardcover record"
 		return m, nil
 	}
-	if h == nil || h.loading || !h.ok || h.info.ID == 0 {
-		m.flash = "Wait for a matching Hardcover book before editing"
+	if h == nil {
+		m.flash = "Looking up this book on Hardcover; press e when it loads"
+		return m.fetchHCInfo()
+	}
+	if h.loading {
+		m.flash = "Hardcover lookup is still loading; press e when it finishes"
+		return m, nil
+	}
+	if h.err != nil {
+		m.flash = "Hardcover lookup failed: " + h.err.Error() + "; retrying now"
+		delete(m.hcInfo, m.detailKey())
+		return m.fetchHCInfo()
+	}
+	if !h.ok || h.info.ID == 0 {
+		m.flash = "No matching book found on Hardcover; r retries the lookup"
 		return m, nil
 	}
 	m.hcEdit = hcEditor{active: true, loading: true, seq: m.hcEdit.seq + 1}

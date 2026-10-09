@@ -213,7 +213,7 @@ func (m Model) screenKeys() []key.Binding {
 		if h := m.hcInfo[m.detailKey()]; h != nil && h.ok {
 			ks = append(ks, kb("e", "edit Hardcover"))
 		}
-		if m.selected.ID != "" {
+		if m.selected.ID != "" || m.hcInfo[m.detailKey()] != nil {
 			ks = append(ks, kb("r", "refresh"))
 		}
 		return append(append(ks, kb("c", "search catalog")), nav...)

@@ -515,16 +515,20 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		return m.searchSelected()
 	case "r":
+		if h := m.hcInfo[m.detailKey()]; h == nil || !h.loading {
+			delete(m.hcInfo, m.detailKey())
+		}
+		m, hcCmd := m.fetchHCInfo()
 		if m.selected.ID == "" {
-			return m, nil // nothing at the library to refresh
+			return m, hcCmd
 		}
 		// The client caches availability for a minute, so this is cheap to mash.
 		if !m.availPending[m.selected.ID] {
 			m.availPending[m.selected.ID] = true
 			m.refreshDetail()
-			return m, m.fetchAvail(m.selected.ID)
+			return m, tea.Batch(hcCmd, m.fetchAvail(m.selected.ID))
 		}
-		return m, nil
+		return m, hcCmd
 	}
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
