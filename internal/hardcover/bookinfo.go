@@ -37,7 +37,7 @@ const bookInfoQuery = `query($id: Int!) {
 
 // Info fetches a book's metadata by Hardcover ID; ok is false if there's
 // no such book.
-func (c *Client) Info(ctx context.Context, id int) (BookInfo, bool, error) {
+func (c *Client) loadInfo(ctx context.Context, id int) (BookInfo, bool, error) {
 	var raw struct {
 		Book *struct {
 			rawBook

@@ -83,9 +83,11 @@ type Model struct {
 
 	// Hardcover's metadata for detail-screen books, by detailKey; see
 	// hcinfo.go. hcLib is the patron's Hardcover library, once loaded.
-	hcInfo map[string]*hcInfo
-	hcLib  map[int]hardcover.UserBook
-	hcEdit hcEditor
+	hcInfo                            map[string]*hcInfo
+	hcLib                             map[int]hardcover.UserBook
+	hcEdit                            hcEditor
+	hcLibraryLoaded, hcLibraryLoading bool
+	hcLibrarySeq                      int
 
 	covers    map[string]*cover // jackets by URL; see cover.go
 	coverMode Covers
@@ -361,6 +363,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hcEditSavedMsg:
 		return m.handleHCEditSaved(msg)
 
+	case hcLibraryMsg:
+		return m.handleHCLibrary(msg)
+
 	case hcInfoMsg:
 		return m.handleHCInfo(msg)
 
@@ -515,10 +520,12 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		return m.searchSelected()
 	case "r":
+		m.hcLibrarySeq++
+		m.hcLibraryLoading, m.hcLibraryLoaded = false, false
 		if h := m.hcInfo[m.detailKey()]; h == nil || !h.loading {
 			delete(m.hcInfo, m.detailKey())
 		}
-		m, hcCmd := m.fetchHCInfo()
+		m, hcCmd := m.fetchHCInfoWithRefresh(true)
 		if m.selected.ID == "" {
 			return m, hcCmd
 		}

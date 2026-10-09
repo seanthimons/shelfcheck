@@ -267,6 +267,11 @@ func (m Model) handleHCEditSaved(msg hcEditSavedMsg) (Model, tea.Cmd) {
 }
 
 func (m *Model) cacheHCEntry(ub hardcover.UserBook) {
+	// A library snapshot requested before this fresh record must not replace it.
+	if m.hcLibraryLoading {
+		m.hcLibrarySeq++
+		m.hcLibraryLoading = false
+	}
 	if m.hcLib == nil {
 		m.hcLib = map[int]hardcover.UserBook{}
 	}

@@ -26,7 +26,9 @@ type Store struct {
 	Session     string // saved catalog session
 	Libby       string // saved Libby link
 
-	mu sync.Mutex // serializes logins between concurrent callers
+	mu   sync.Mutex // serializes logins between concurrent callers
+	hcMu sync.Mutex
+	hc   *hardcover.Client
 }
 
 // DefaultDir is ~/.config/shelfcheck (or the platform equivalent).
@@ -81,10 +83,16 @@ func (s *Store) HardcoverClient() *hardcover.Client {
 	if tok == "" {
 		return nil
 	}
+	s.hcMu.Lock()
+	defer s.hcMu.Unlock()
 	c := hardcover.New(tok)
+	if s.hc != nil && s.hc.Token == c.Token {
+		return s.hc
+	}
 	if dir, err := os.UserCacheDir(); err == nil {
 		c.CacheDir = filepath.Join(dir, "shelfcheck", "hardcover")
 	}
+	s.hc = c
 	return c
 }
 

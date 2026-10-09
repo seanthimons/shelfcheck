@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -25,8 +26,12 @@ type (
 		key  string
 		info hardcover.BookInfo
 		ok   bool
-		lib  map[int]hardcover.UserBook // the patron's library, on first use
 		err  error
+	}
+	hcLibraryMsg struct {
+		seq int
+		lib map[int]hardcover.UserBook
+		err error
 	}
 	// hcInfo is Hardcover's metadata for one detail-screen book.
 	hcInfo struct {
@@ -51,6 +56,10 @@ func (m Model) detailKey() string {
 
 // fetchHCInfo looks the selected book up on Hardcover, unless it has been.
 func (m Model) fetchHCInfo() (Model, tea.Cmd) {
+	return m.fetchHCInfoWithRefresh(false)
+}
+
+func (m Model) fetchHCInfoWithRefresh(refresh bool) (Model, tea.Cmd) {
 	var hc *hardcover.Client
 	if m.acct != nil {
 		hc = m.acct.HardcoverClient()
@@ -60,20 +69,18 @@ func (m Model) fetchHCInfo() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.hcInfo[key] = &hcInfo{loading: true}
-	b, id, needLib := m.selected, m.selectedHC, m.hcLib == nil
+	b, id := m.selected, m.selectedHC
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
+		if refresh {
+			hc.RefreshMetadata(ctx)
+		}
 		msg := hcInfoMsg{key: key}
 		if id != 0 {
 			msg.info, msg.ok, msg.err = hc.Info(ctx, id)
 		} else {
 			msg.info, msg.ok, msg.err = hc.Lookup(ctx, b.Title, firstOr(b.Authors, ""))
-		}
-		if needLib && msg.err == nil {
-			if lib, err := hc.Library(ctx); err == nil {
-				msg.lib = hardcover.Shelves(lib)
-			}
 		}
 		return msg
 	}
@@ -81,12 +88,38 @@ func (m Model) fetchHCInfo() (Model, tea.Cmd) {
 
 func (m Model) handleHCInfo(msg hcInfoMsg) (Model, tea.Cmd) {
 	m.hcInfo[msg.key] = &hcInfo{ok: msg.ok, info: msg.info, err: msg.err}
-	if msg.lib != nil {
-		m.hcLib = msg.lib
+	var cmds []tea.Cmd
+	if msg.err == nil && msg.ok && !m.hcLibraryLoaded && !m.hcLibraryLoading && m.acct != nil {
+		if hc := m.acct.HardcoverClient(); hc != nil {
+			m.hcLibraryLoading = true
+			m.hcLibrarySeq++
+			seq := m.hcLibrarySeq
+			cmds = append(cmds, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				lib, err := hc.Library(ctx)
+				return hcLibraryMsg{seq: seq, lib: hardcover.Shelves(lib), err: err}
+			})
+		}
 	}
 	if m.screen == detailScreen && m.detailKey() == msg.key {
 		m.refreshDetail()
-		return m, m.fetchCover(m.coverURL())
+		cmds = append(cmds, m.fetchCover(m.coverURL()))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleHCLibrary(msg hcLibraryMsg) (Model, tea.Cmd) {
+	if msg.seq != m.hcLibrarySeq {
+		return m, nil
+	}
+	m.hcLibraryLoading = false
+	if msg.err == nil {
+		m.hcLib = msg.lib
+		m.hcLibraryLoaded = true
+	}
+	if m.screen == detailScreen {
+		m.refreshDetail()
 	}
 	return m, nil
 }

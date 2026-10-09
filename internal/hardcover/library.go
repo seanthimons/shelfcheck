@@ -48,7 +48,7 @@ type UserBook struct {
 }
 
 // Library returns every book in the token owner's Hardcover library.
-func (c *Client) Library(ctx context.Context) ([]UserBook, error) {
+func (c *Client) loadLibrary(ctx context.Context) ([]UserBook, error) {
 	const pageSize = 100 // Hardcover's cap per field
 	var out []UserBook
 	for offset := 0; ; offset += pageSize {
@@ -66,7 +66,7 @@ func (c *Client) Library(ctx context.Context) ([]UserBook, error) {
 			return nil, err
 		}
 		if len(raw.Me) == 0 {
-			return out, nil
+			return nil, fmt.Errorf("hardcover: no user for this token")
 		}
 		rows := raw.Me[0].UserBooks
 		for _, r := range rows {

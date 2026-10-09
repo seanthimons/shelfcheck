@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
+	"shelfcheck/internal/cache"
 	"sync"
 	"time"
 )
@@ -37,6 +39,7 @@ type Client struct {
 	Library   string // e.g. "cincinnatilibrary"
 	UserAgent string
 	HTTP      *http.Client
+	Disk      *cache.Store // optional override; production defaults to the shared SQLite cache
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
@@ -80,15 +83,26 @@ func (c *Client) getJSON(ctx context.Context, path string, params url.Values, tt
 	if body, ok := c.cached(u); ok {
 		return json.Unmarshal(body, out)
 	}
-	body, err := c.fetch(ctx, u, nil)
+	disk := c.Disk
+	if disk == nil && c.BaseURL == DefaultBaseURL {
+		disk = cache.Default()
+	}
+	body, err := disk.Fetch(ctx, "catalog", u, func() ([]byte, time.Duration, error) {
+		body, err := c.fetch(ctx, u, nil)
+		if err != nil {
+			return nil, 0, err
+		}
+		decoded := reflect.New(reflect.TypeOf(out).Elem()).Interface()
+		if err = json.Unmarshal(body, decoded); err != nil {
+			return nil, 0, fmt.Errorf("bibliocommons: decoding %s: %w", u, err)
+		}
+		c.store(u, body, ttl)
+		return body, ttl, nil
+	})
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("bibliocommons: decoding %s: %w", u, err)
-	}
-	c.store(u, body, ttl)
-	return nil
+	return json.Unmarshal(body, out)
 }
 
 func (c *Client) gatewayURL(path string, params url.Values) string {

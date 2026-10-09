@@ -79,7 +79,7 @@ const bookSearchQuery = `query($q: String!) {
 // FindBook looks a book up by title and author, preferring the most-read
 // match by that author (imports and stray editions leave near-empty
 // duplicates). ok is false if nothing matched.
-func (c *Client) FindBook(ctx context.Context, title, author string) (Book, bool, error) {
+func (c *Client) loadFindBook(ctx context.Context, title, author string) (Book, bool, error) {
 	var found struct {
 		Search struct {
 			Results struct {

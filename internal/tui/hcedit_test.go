@@ -205,3 +205,16 @@ func TestHCEditorResizeBeforeRecordLoads(t *testing.T) {
 		t.Fatal("resize changed loading state")
 	}
 }
+
+func TestFreshEditorRecordSurvivesOlderLibrarySnapshot(t *testing.T) {
+	m := editorModel(t)
+	m.hcLibraryLoading = true
+	m.hcLibrarySeq = 2
+	fresh := m.hcLib[42]
+	fresh.Rating = 5
+	m.cacheHCEntry(fresh)
+	m, _ = m.handleHCLibrary(hcLibraryMsg{seq: 2, lib: map[int]hardcover.UserBook{42: {Rating: 2}}})
+	if m.hcLib[42].Rating != 5 || m.hcLibraryLoading {
+		t.Fatal("old library response replaced fresh edit")
+	}
+}
