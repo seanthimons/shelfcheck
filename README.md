@@ -54,6 +54,24 @@ library information, wishlists, community lists, and editing existing records.
 These integrations can be used independently; some combined views report notes
 when a source is unavailable.
 
+### Local environment setup
+
+For local development, copy `.env.example` to `.env`, make it owner-readable
+only, and replace the placeholders. The file is ignored by Git:
+
+```sh
+cp .env.example .env
+chmod 600 .env
+# edit .env, then load it for this shell
+set -a && . ./.env && set +a
+```
+
+`HARDCOVER_TOKEN` is used by Shelfcheck. `HARDCOVER_USERNAME` is an optional
+operator label only; Shelfcheck derives the account identity from the token and
+does not trust a configured username for API operations. For normal installed
+use, you may instead keep the same variables in the private platform config
+file described in the [configuration guide](docs/configuration.md).
+
 Follow the [configuration guide](docs/configuration.md) to store credentials
 privately and choose themes or book jackets. The [Hardcover editor guide](docs/hardcover-editing.md)
 explains saves, clearing fields, and recovery after a failed update.

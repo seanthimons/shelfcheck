@@ -16,7 +16,7 @@ func TestParseRef(t *testing.T) {
 		{"<https://hardcover.app/@emma/lists/hugo-winners>", Ref{Kind: "list", Owner: "emma", Slug: "hugo-winners"}, true},
 		{"\u200bhttps://hardcover.app/prompts/what-is-your-favorite-dark-academia-book\n", Ref{Kind: "prompt", Slug: "what-is-your-favorite-dark-academia-book"}, true},
 		{"try https://hardcover.app/prompts/favorite-space-opera-books please", Ref{Kind: "prompt", Slug: "favorite-space-opera-books"}, true},
-		{"https://hardcover.app/@az1doazideazide/vibes/recommendations", Ref{Kind: "vibe", Owner: "az1doazideazide", Slug: "recommendations"}, true},
+		{"https://hardcover.app/@example-user/vibes/recommendations", Ref{Kind: "vibe", Owner: "example-user", Slug: "recommendations"}, true},
 		{"https://hardcover.app/books/a-memory-called-empire", Ref{}, false},
 		{"https://example.com/prompts/x-y", Ref{}, false},
 		{"murderbot", Ref{}, false},

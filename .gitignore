@@ -1,3 +1,21 @@
 /shelfcheck
 /.ssh/
 *.log
+
+# Local account credentials and personal Shelfcheck state.
+.env
+.env.*
+!.env.example
+/credentials.env
+/session.json
+/libby.json
+/libby-probe/
+/cache.sqlite
+/cache.sqlite-*
+
+# Private credentials and exported reading data.
+/*.pem
+/*.p12
+/*.pfx
+/reading.csv
+/shelfcheck-export*.csv

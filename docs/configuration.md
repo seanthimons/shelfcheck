@@ -99,7 +99,15 @@ that writes raw private responses, not a required setup step.
 ## Hardcover
 
 Get your API token from your Hardcover account, then add it to the same private
-`credentials.env` file:
+`credentials.env` file. For development from a checkout, you can instead copy
+`.env.example` to the ignored local `.env`, restrict it to `0600`, and load it
+into your shell (`set -a && . ./.env && set +a`).
+
+`HARDCOVER_USERNAME` in `.env` is an optional human-readable operator label;
+Shelfcheck uses the authenticated token's `me` result for the account identity.
+Do not treat it as authorization or an API target selector.
+
+The required token setting is:
 
 ```dotenv
 HARDCOVER_TOKEN=your-hardcover-api-token
