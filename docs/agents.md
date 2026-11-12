@@ -15,7 +15,9 @@ files. The root [AGENTS.md](../AGENTS.md) is for agents modifying this repositor
 Pass flags before positional arguments. Use an argument array when invoking the
 binary from a program; do not concatenate user queries into a shell command.
 Library and branch defaults are `cincinnatilibrary` and `1` (its Main Library).
-Pass `-library` and `-home` explicitly when using another catalog or branch.
+`library` and `home` in `config.toml` override those defaults. Pass `-library`
+and `-home` explicitly for reproducible catalog and branch selection. Invalid
+or unreadable config files cause catalog commands to fail.
 These flags belong to individual commands, not before `json`.
 
 Successful data commands write one indented JSON value to stdout. Diagnostics,

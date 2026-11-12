@@ -35,7 +35,9 @@ func exportCmd(args []string) error {
 	}
 	fs := flag.NewFlagSet("export hardcover", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	outPath := fs.String("o", "", "write to this file instead of stdout")
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

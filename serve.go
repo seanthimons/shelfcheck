@@ -33,7 +33,9 @@ func serve(args []string) error {
 	home, _ := os.UserHomeDir()
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var o options
-	o.register(fs)
+	if err := o.register(fs); err != nil {
+		return err
+	}
 	addr := fs.String("addr", ":2222", "address to listen on")
 	hostKey := fs.String("host-key", ".ssh/shelfcheck_ed25519", "server host key; created on first run")
 	authKeys := fs.String("authorized-keys", filepath.Join(home, ".ssh", "authorized_keys"), "public keys allowed to connect, in authorized_keys format")

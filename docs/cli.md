@@ -36,7 +36,9 @@ The local TUI, `serve`, `login`, `export hardcover`, and all JSON commands excep
 | `-library` | `cincinnatilibrary` | Catalog subdomain, such as the `example` in `example.bibliocommons.com`; do not pass the full URL. |
 | `-home` | `1` | Branch code used for shelf availability; `1` is Cincinnati's Main Library. Discover other codes with `json branches`. |
 
-`-home` is a command setting, not a saved preference or the account's assigned
+`library` and `home` in `config.toml` override the built-in defaults in this
+table; command flags override the saved settings. See [configuration](configuration.md).
+`-home` selects shelf availability independently of the account's assigned
 home branch. The default code's meaning depends on the library. Some commands
 accept it for consistency without using it, including `branches`, `login`,
 `history`, `checkouts`, `holds`, and `export hardcover`.

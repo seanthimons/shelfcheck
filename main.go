@@ -8,6 +8,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -31,10 +32,13 @@ type options struct {
 	theme    string
 }
 
-func (o *options) register(fs *flag.FlagSet) {
-	o.registerCatalog(fs)
+func (o *options) register(fs *flag.FlagSet) error {
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	fs.BoolVar(&o.anywhere, "anywhere", false, "start searches across all branches instead of only what's on the shelf at -home")
 	fs.StringVar(&o.theme, "theme", "", `color theme: terminal (follows your terminal), umber, vellum, orpiment, cinnabar, or one from themes.toml in the config directory (default $SHELFCHECK_THEME, else the last one picked with t)`)
+	return nil
 }
 
 // pickTheme resolves the theme from -theme, then $SHELFCHECK_THEME, then the
@@ -58,9 +62,18 @@ func pickTheme(flagValue string) ([]theme.Theme, int, error) {
 	return themes, max(0, theme.Index(themes, theme.Saved(configDir()))), nil
 }
 
-func (o *options) registerCatalog(fs *flag.FlagSet) {
-	fs.StringVar(&o.library, "library", "cincinnatilibrary", "BiblioCommons library (subdomain of its bibliocommons.com catalog)")
-	fs.StringVar(&o.home, "home", "1", "home branch code (1 = Main Library)")
+func (o *options) registerCatalog(fs *flag.FlagSet) error {
+	c := struct {
+		Library string `toml:"library"`
+		Home    string `toml:"home"`
+	}{Library: "cincinnatilibrary", Home: "1"}
+	path := filepath.Join(configDir(), "config.toml")
+	if _, err := toml.DecodeFile(path, &c); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	fs.StringVar(&o.library, "library", c.Library, "BiblioCommons library subdomain (overrides library in config.toml)")
+	fs.StringVar(&o.home, "home", c.Home, "home branch code (overrides home in config.toml; 1 = Cincinnati Main Library)")
+	return nil
 }
 
 func main() {
@@ -88,7 +101,10 @@ func main() {
 	}
 
 	var o options
-	o.register(flag.CommandLine)
+	if err := o.register(flag.CommandLine); err != nil {
+		fmt.Fprintln(os.Stderr, "shelfcheck:", err)
+		os.Exit(1)
+	}
 	coversFlag := flag.String("covers", "", `book jackets: kitty (sharp, in Konsole, kitty and Ghostty), blocks (half blocks, in any true-color terminal), off, or auto, which picks kitty when the terminal is one of those and not inside tmux (default $SHELFCHECK_COVERS, else covers in config.toml, else auto)`)
 	flag.Parse()
 	covers, err := tui.PickCovers(firstSet(*coversFlag, os.Getenv("SHELFCHECK_COVERS"), savedCovers()), os.Getenv)

@@ -12,8 +12,20 @@ and `1` (Cincinnati's Main Library). Discover codes with:
 ./shelfcheck json branches -library cincinnatilibrary
 ```
 
-Supply these flags on each invocation that needs another catalog or branch;
-`config.toml` does not save them. The local TUI starts with home-shelf filtering;
+Save your defaults in `config.toml` in the Shelfcheck config directory, normally
+`~/.config/shelfcheck/config.toml` on Linux. Add these top-level keys alongside
+any existing `theme` or `covers` settings:
+
+```toml
+library = "cincinnatilibrary"
+home = "1"
+```
+
+Keep the branch code quoted, even when it contains only digits. These defaults
+apply to the local TUI, SSH server, login, export, and catalog JSON commands.
+Explicit `-library` and `-home` flags override the saved values. Omitted keys
+use the built-in defaults above. An unreadable or invalid config file stops
+catalog commands with an error. The local TUI starts with home-shelf filtering;
 `-anywhere` changes that starting state. JSON search starts across the catalog;
 use `-home-only` to restrict it. Other JSON discovery commands have their own
 availability rules; see the [CLI reference](cli.md).
@@ -31,7 +43,7 @@ on Windows they follow `%AppData%` and `%LocalAppData%`.
 | Config: `credentials.env` | Optional library card/PIN and Hardcover token |
 | Config: `session.json` | Saved library login session |
 | Config: `libby.json` | Linked Libby identity |
-| Config: `config.toml` | Saved theme and optional cover mode |
+| Config: `config.toml` | Library, home branch, theme and optional cover mode |
 | Config: `themes.toml` | Custom palettes |
 | Config: `libby-probe/` | Raw account responses if you run `libby probe` |
 | Cache: `cache.sqlite` (and SQLite sidecars) | Cached catalog and Hardcover responses, including private Hardcover snapshots |
@@ -107,7 +119,9 @@ into your shell (`set -a && . ./.env && set +a`).
 Shelfcheck uses the authenticated token's `me` result for the account identity.
 Do not treat it as authorization or an API target selector.
 
-The required token setting is:
+Hardcover authentication stays in `credentials.env` or the environment;
+`config.toml` does not read authentication tokens. Restrict `credentials.env`
+to owner access with `chmod 600`. The required token setting is:
 
 ```dotenv
 HARDCOVER_TOKEN=your-hardcover-api-token

@@ -30,7 +30,9 @@ func registerStore(fs *flag.FlagSet) *account.Store {
 func loginCmd(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	st := registerStore(fs)
 	check := fs.Bool("check", false, "only check whether the saved session still works")
 	if err := fs.Parse(args); err != nil {

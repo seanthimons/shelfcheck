@@ -7,7 +7,8 @@ project directory, use `./shelfcheck` instead. Catalog browsing needs no account
 The default catalog is Cincinnati & Hamilton County Public Library
 (`cincinnatilibrary`) and the default home branch is Main Library (`1`).
 Choose another BiblioCommons catalog and branch with
-`-library` and `-home`; find branch codes with `shelfcheck json branches`.
+`library` and `home` in `config.toml`, or override them with `-library` and
+`-home`; find branch codes with `shelfcheck json branches`.
 
 ```sh
 shelfcheck

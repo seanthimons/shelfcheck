@@ -138,7 +138,9 @@ type facetOut struct {
 func jsonSearch(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json search", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	typ := fs.String("type", "keyword", "keyword, title, author, subject, genre or series")
 	homeOnly := fs.Bool("home-only", false, "only titles with a copy on the shelf at -home right now")
 	var formats, genres, filters listFlag
@@ -358,7 +360,9 @@ type reviewOut struct {
 func jsonBook(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json book", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	reviews := fs.Bool("reviews", true, "include trade reviews and the author bio (one extra request per book)")
 	excerpt := fs.Bool("excerpt", false, "include the excerpt (often a whole opening chapter)")
 	if err := fs.Parse(args); err != nil {
@@ -433,7 +437,9 @@ type branchOut struct {
 func jsonBranches(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json branches", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -472,7 +478,9 @@ type patronItemOut struct {
 func jsonPatron(ctx context.Context, what string, args []string) error {
 	fs := flag.NewFlagSet("json "+what, flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	st := registerStore(fs)
 	full := fs.Bool("full", false, "include descriptions and subjects")
 	if err := fs.Parse(args); err != nil {
@@ -621,7 +629,9 @@ type wishMatchOut struct {
 func jsonWishlist(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json wishlist", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	tagName := fs.String("tag", "want to read", "Libby tag to check")
 	var formats listFlag
 	fs.Var(&formats, "format", "catalog formats to accept (default book, ebook); print must be on the shelf at -home, digital available to borrow now")
@@ -706,7 +716,9 @@ https://hardcover.app/@<user>/lists/<slug>, or a bare prompt slug.`)
 		fs.PrintDefaults()
 	}
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	limit := fs.Int("limit", 30, "books to check")
 	all := fs.Bool("all", false, "list every book, not just the ones available now")
 	lang := fs.String("lang", "eng", `catalog language code to accept ("" for any)`)
@@ -796,7 +808,9 @@ type profileOut struct {
 func jsonRecommend(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json recommend", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	limit := fs.Int("limit", 20, "number of picks")
 	withWish := fs.Bool("wishlist", false, "also check your want-to-read list, Libby and Hardcover (~25s more)")
 	verbose := fs.Bool("v", false, "print progress to stderr")
@@ -901,7 +915,9 @@ type arrivalOut struct {
 func jsonArrivals(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("json arrivals", flag.ContinueOnError)
 	var o options
-	o.registerCatalog(fs)
+	if err := o.registerCatalog(fs); err != nil {
+		return err
+	}
 	audience := fs.String("audience", "adult", `catalog audience, e.g. adult, teen, juvenile; "" for any`)
 	scan := fs.Int("scan", 75, "recently acquired titles to check for a copy on a new shelf")
 	limit := fs.Int("limit", 30, "number of arrivals")
