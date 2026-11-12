@@ -32,6 +32,7 @@ commands:
   holds                       your holds, incl. Libby/OverDrive        (needs shelfcheck login)
   libby                       your Libby tags: borrowed, sampled, wishlists (needs shelfcheck libby link)
   recommend                   picks you can get now, from your reading record (needs login and/or libby link)
+  arrivals                    books on the new-arrivals shelves at -home now, ranked against your reading record if there is one
   wishlist                    which "want to read" titles you can get now: print on the shelf at -home, or ebooks (needs libby link and/or HARDCOVER_TOKEN)
   prompt <url|slug>           which books from a Hardcover prompt or list you can get now (needs HARDCOVER_TOKEN)
 
@@ -61,6 +62,8 @@ func jsonCmd(args []string) error {
 		err = jsonWishlist(ctx, args[1:])
 	case "recommend":
 		err = jsonRecommend(ctx, args[1:])
+	case "arrivals":
+		err = jsonArrivals(ctx, args[1:])
 	case "prompt":
 		err = jsonPrompt(ctx, args[1:])
 	default:
@@ -883,6 +886,70 @@ func jsonRecommend(ctx context.Context, args []string) error {
 		bo := newBookOut(o.library, p.Bib)
 		bo.Subjects, bo.ISBNs = nil, nil
 		out.Picks = append(out.Picks, pickOut{bookOut: bo, OnShelfAtHome: p.Print, EbookNow: p.Ebook, Score: round1(p.Score), Why: p.Reasons, From: p.From})
+	}
+	return writeJSON(out)
+}
+
+type arrivalOut struct {
+	bookOut
+	Shelf        string   `json:"shelf"`
+	Score        float64  `json:"score"`
+	Why          []string `json:"why,omitempty"`
+	HardcoverURL string   `json:"hardcover_url,omitempty"`
+}
+
+func jsonArrivals(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("json arrivals", flag.ContinueOnError)
+	var o options
+	o.registerCatalog(fs)
+	audience := fs.String("audience", "adult", `catalog audience, e.g. adult, teen, juvenile; "" for any`)
+	scan := fs.Int("scan", 75, "recently acquired titles to check for a copy on a new shelf")
+	limit := fs.Int("limit", 30, "number of arrivals")
+	verbose := fs.Bool("v", false, "print progress to stderr")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	client := bc.New(o.library)
+	st := account.DefaultStore(configDir())
+	opts := recommend.ArrivalOptions{Home: o.home, Audience: *audience, Language: "eng", Scan: *scan, Limit: *limit}
+	// Without a reading record the arrivals come back unranked.
+	var rec *account.Record
+	if st.HasCatalog() || st.HasLibby() || st.HasHardcover() {
+		r, err := st.LoadRecord(ctx, client, o.library)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "shelfcheck: warning: no reading record, so arrivals aren't ranked:", err)
+		} else {
+			rec, opts.Hardcover = r, st.HardcoverClient()
+			for _, n := range r.Notes {
+				fmt.Fprintln(os.Stderr, "shelfcheck: warning:", n)
+			}
+		}
+	}
+	var progress func(recommend.ArrivalsResult)
+	if *verbose {
+		progress = func(r recommend.ArrivalsResult) {
+			fmt.Fprintf(os.Stderr, "checked %d, %d on a new shelf\n", r.Checked, len(r.Items))
+		}
+	}
+	res, err := recommend.Arrivals(ctx, client, rec, opts, progress)
+	if err != nil {
+		return err
+	}
+	for _, n := range res.Notes {
+		fmt.Fprintln(os.Stderr, "shelfcheck: warning:", n)
+	}
+	out := struct {
+		Checked      int          `json:"checked"`
+		Failed       int          `json:"failed"`
+		AlreadyKnown int          `json:"already_known"`
+		Partial      bool         `json:"partial"`
+		Ranked       bool         `json:"ranked"`
+		Arrivals     []arrivalOut `json:"arrivals"`
+	}{res.Checked, res.Failed, res.Known, res.Partial(), rec != nil, []arrivalOut{}}
+	for _, a := range res.Items {
+		bo := newBookOut(o.library, a.Bib)
+		bo.Subjects, bo.ISBNs, bo.CallNumber = nil, nil, firstSet(a.CallNumber, bo.CallNumber)
+		out.Arrivals = append(out.Arrivals, arrivalOut{bookOut: bo, Shelf: a.Shelf, Score: round1(a.Score), Why: a.Reasons, HardcoverURL: a.HardcoverURL})
 	}
 	return writeJSON(out)
 }

@@ -40,6 +40,7 @@ appropriate for your consumer. Retain catalog IDs as strings.
 | `wishlist` | Array of requested titles | `available_now`, optional catalog `matches` and `available_at` |
 | `prompt` | Object with collection metadata and `books` | `kind` is `prompt` or `list`; each book can have `matches` |
 | `recommend` | Object with `profile` and `picks` | Each pick includes `score`, `why` and availability indicators |
+| `arrivals` | Object with `checked`, `failed`, `already_known`, `partial`, `ranked`, `arrivals` | `partial` means the scan stopped early or a check failed; scores are meaningful only when `ranked` |
 
 ## A catalog discovery workflow
 

@@ -22,7 +22,7 @@ Right/Down/Space/Enter moves forward. On the spoiler field, Space, Enter, Left,
 or Right toggles the flag. Enter in the review inserts a new line.
 
 The editor owns letter keys, including `q`, `p`, `w`, `m`, and `t`, so you can
-type ordinary review text. Ctrl+C still quits the application. Once you press
+type ordinary review text. Ctrl+C or Ctrl+Q still quits the application. Once you press
 Ctrl+S, Esc cannot cancel the request already sent to Hardcover; wait for the
 response before making further edits. A successful save closes the editor.
 
@@ -50,5 +50,6 @@ Esc and reopen the editor rather than assuming nothing saved. You may want to
 copy your review draft before leaving after an error.
 
 This editor updates existing records. To add a new book, add it on Hardcover
-first, or use `+` from a [Hardcover collection](tui.md#hardcover-prompts-lists-and-vibes)
-to add it to Want to Read.
+first, or use `+` from [Book details](tui.md#book-details) or a
+[Hardcover collection](tui.md#hardcover-prompts-lists-and-vibes) to add it to
+Want to Read.

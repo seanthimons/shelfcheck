@@ -74,6 +74,7 @@ const (
 	Subject SearchType = "subject"
 	Series  SearchType = "series"
 	Genre   SearchType = "genre" // not a gateway searchType; sent as a genre:(...) query
+	Boolean SearchType = "bl"    // the catalog's boolean query language, e.g. "nw:[0 TO 180]"
 )
 
 // Query describes a search.

@@ -31,6 +31,7 @@ func (m Model) navTabs() []navTab {
 	if m.hc.col != nil {
 		tabs = append(tabs, navTab{hardcoverScreen, "Hardcover"})
 	}
+	tabs = append(tabs, navTab{arrivalsScreen, "New arrivals"})
 	if m.acct != nil {
 		tabs = append(tabs, navTab{forYouScreen, "For you"}, navTab{wishlistScreen, "Wishlist"}, navTab{accountScreen, "Account"})
 	}
@@ -187,7 +188,7 @@ func (m Model) screenKeys() []key.Binding {
 	if m.hcEdit.active {
 		return []key.Binding{kb("ctrl+s", "save"), kb("tab", "next field"), kb("shift+tab", "previous field"), kb("esc", "cancel")}
 	}
-	nav := []key.Binding{kb("p", "for you"), kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}
+	nav := []key.Binding{kb("n", "new arrivals"), kb("p", "for you"), kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}
 	switch m.screen {
 	case searchScreen:
 		esc := kb("esc", "quit")
@@ -195,7 +196,7 @@ func (m Model) screenKeys() []key.Binding {
 			esc = kb("esc", "back to results")
 		}
 		return []key.Binding{kb("enter", "search"), kb("tab", "type"), esc,
-			kb("alt+p", "for you"), kb("alt+w", "wishlist"), kb("alt+m", "account"), kb("alt+t", "theme")}
+			kb("alt+n", "new arrivals"), kb("alt+p", "for you"), kb("alt+w", "wishlist"), kb("alt+m", "account"), kb("alt+t", "theme"), kb("ctrl+q", "quit")}
 	case resultsScreen:
 		switch m.panel {
 		case panelCategories:
@@ -210,6 +211,11 @@ func (m Model) screenKeys() []key.Binding {
 		return append(append(ks, kb("a", "home only"), kb("o", "sort")), nav...)
 	case detailScreen:
 		ks := []key.Binding{kb("↑↓", "scroll"), kb("esc", "back")}
+		// + is offered before the Hardcover lookup lands; pressing it early
+		// says what it's waiting for.
+		if m.acct != nil && m.acct.HasHardcover() {
+			ks = append(ks, kb("+", "want to read"))
+		}
 		if h := m.hcInfo[m.detailKey()]; h != nil && h.ok {
 			ks = append(ks, kb("e", "edit Hardcover"))
 		}
@@ -232,6 +238,12 @@ func (m Model) screenKeys() []key.Binding {
 	case hardcoverScreen:
 		return append([]key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("+", "want to read"), kb("A", "show all"),
 			kb("r", "recheck"), kb("esc", "back")}, nav...)
+	case arrivalsScreen:
+		ks := []key.Binding{kb("↑↓", "move"), kb("enter", "open")}
+		if m.acct != nil && m.acct.HasHardcover() {
+			ks = append(ks, kb("+", "want to read"))
+		}
+		return append(append(ks, kb("r", "rescan")), nav...)
 	case wishlistScreen:
 		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("A", "show all"), kb("r", "recheck"),
 			kb("p", "for you"), kb("m", "account"), kb("/", "search")}
@@ -239,8 +251,8 @@ func (m Model) screenKeys() []key.Binding {
 	return nil
 }
 
-// globalKeys work on every screen but the search box.
-var globalKeys = []key.Binding{kb("t", "theme"), kb("?", "all keys"), kb("q", "quit")}
+// globalKeys work on every screen but the search box; ctrl+q works there too.
+var globalKeys = []key.Binding{kb("t", "theme"), kb("?", "all keys"), kb("q", "quit"), kb("ctrl+q", "quit anywhere")}
 
 func (m Model) viewFooter() string {
 	// A message (error, flash, progress) leads, in its own style.

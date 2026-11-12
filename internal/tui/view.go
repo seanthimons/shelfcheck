@@ -54,6 +54,8 @@ func (m Model) View() tea.View {
 		body = m.viewForYou()
 	case hardcoverScreen:
 		body = m.viewHardcover()
+	case arrivalsScreen:
+		body = m.viewArrivals()
 	}
 	if m.hcEdit.active {
 		body = m.viewHCEditor()

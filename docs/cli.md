@@ -286,6 +286,35 @@ optional `hardcover` (source prompt/list). The profile includes `books_read`,
 `also_picked_from`. Scores express the recommender's ranking, not a probability
 that you will like a book.
 
+### `json arrivals [flags]`
+
+```sh
+shelfcheck json arrivals
+shelfcheck json arrivals -home 1 -scan 150 -limit 10 -v
+```
+
+Lists print books sitting on a New Arrivals shelf at the home branch now. It
+needs no account. Accepts `-audience` (default `adult`; empty for any), `-scan`
+(default 75 recently added titles to check), `-limit` (default 30 returned),
+`-v` (progress on stderr), and catalog settings. Only English-language books
+added in the last 180 days are considered. A book counts when one copy is both
+available and shelved in a collection named "new" at the home branch.
+
+With a configured catalog, Libby, or Hardcover reading record the arrivals are
+ranked against it and books you have already read, borrowed, placed on hold, or left out are dropped.
+With `HARDCOVER_TOKEN`, Hardcover's own picks for you, ratings, and reader tags
+also count. If the record cannot be loaded, a stderr warning is printed and the
+arrivals are returned unranked, newest first.
+
+Returns `{checked, failed, already_known, partial, ranked, arrivals}`. `checked`
+is the number of recent titles examined, `failed` the availability checks that
+failed, and `already_known` the books dropped because of your record. `partial`
+is true when more recent titles remained beyond `-scan` or any check failed, so
+an empty or short list is not proof that the shelf is empty; raise `-scan` to
+look further. Each arrival extends common book fields with `shelf`, `score`,
+optional `why` (reason strings), and optional `hardcover_url`. Scores are zero
+when `ranked` is false.
+
 ## Accounts, linking, and export
 
 ### `login [flags]`

@@ -30,6 +30,7 @@ const (
 	wishlistScreen
 	forYouScreen
 	hardcoverScreen
+	arrivalsScreen
 )
 
 var searchTypes = []bc.SearchType{bc.Keyword, bc.Title, bc.Author, bc.Subject, bc.Genre, bc.Series}
@@ -127,6 +128,10 @@ type Model struct {
 	recCursor  int
 
 	hc hcState // Hardcover prompt or list; see hardcover.go
+	// hcWantBusy is set while a + (want to read) is being saved, from any screen.
+	hcWantBusy bool
+
+	arr arrivalsState // new arrivals; see arrivals.go
 
 	// Themes to switch between with t; see theme.go.
 	themes    []theme.Theme
@@ -378,11 +383,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case kittyMsg:
 		return m, m.placeCover(msg)
 
-	case hcCollectionMsg, hcCheckedMsg, hcShelvedMsg:
+	case hcCollectionMsg, hcCheckedMsg:
 		return m.handleHardcoverMsg(msg)
 
+	case hcWantMsg:
+		return m.handleHCWant(msg), nil
+
+	case arrivalsProgressMsg, arrivalsDoneMsg:
+		return m.handleArrivalsMsg(msg)
+
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
+		if k := msg.String(); k == "ctrl+c" || k == "ctrl+q" {
 			return m, tea.Quit
 		}
 		if m.hcEdit.active {
@@ -412,6 +423,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForYou(msg)
 		case hardcoverScreen:
 			return m.updateHardcover(msg)
+		case arrivalsScreen:
+			return m.updateArrivals(msg)
 		case searchScreen:
 			return m.updateSearch(msg)
 		case resultsScreen:
@@ -516,6 +529,8 @@ func (m Model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "e":
 		return m.openHCEditor()
+	case "+":
+		return m.wantSelected()
 	case "q":
 		return m, tea.Quit
 	case "esc", "backspace", "left", "h":

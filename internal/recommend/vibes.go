@@ -38,6 +38,17 @@ func (e *engine) elsewhere(ctx context.Context, b hardcover.Book, reason, from s
 	return nil
 }
 
+// vibeLists are Hardcover's own picks for the patron, strongest first.
+var vibeLists = []struct {
+	slug   string
+	share  float64 // of MaxVibes lookups
+	base   float64
+	reason string
+}{
+	{"recommendations", 0.7, 2.5, "Hardcover recommends it from your reading (#%d)"},
+	{"top-picks", 0.3, 1.5, "one of Hardcover's top picks for you (#%d)"},
+}
+
 // vibes checks the catalog for Hardcover's own picks for the patron: its
 // "recommendations" vibe (from their reading history) and "top-picks"
 // (popular books they'd like), best first. Books an earlier stage already
@@ -51,16 +62,7 @@ func (e *engine) vibes(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	lists := []struct {
-		slug   string
-		share  float64 // of MaxVibes lookups
-		base   float64
-		reason string
-	}{
-		{"recommendations", 0.7, 2.5, "Hardcover recommends it from your reading (#%d)"},
-		{"top-picks", 0.3, 1.5, "one of Hardcover's top picks for you (#%d)"},
-	}
-	for _, l := range lists {
+	for _, l := range vibeLists {
 		budget := max(1, int(float64(e.opts.MaxVibes)*l.share))
 		v, ok, err := hc.VibeBySlug(ctx, user, l.slug, 100)
 		if err != nil {

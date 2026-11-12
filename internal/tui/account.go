@@ -56,6 +56,9 @@ func (m Model) navKey(key string) (Model, tea.Cmd, bool) {
 	case "alt+p":
 		mm, cmd := m.openForYou()
 		return mm, cmd, true
+	case "alt+n":
+		mm, cmd := m.openArrivals()
+		return mm, cmd, true
 	case "alt+t":
 		mm, cmd := m.cycleTheme()
 		return mm, cmd, true
@@ -72,6 +75,11 @@ func (m Model) navKey(key string) (Model, tea.Cmd, bool) {
 	case "m":
 		if m.screen != accountScreen {
 			mm, cmd := m.openAccount()
+			return mm, cmd, true
+		}
+	case "n":
+		if m.screen != arrivalsScreen {
+			mm, cmd := m.openArrivals()
 			return mm, cmd, true
 		}
 	case "p":

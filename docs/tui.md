@@ -53,10 +53,10 @@ to the last loaded row, not necessarily the final match in the catalog. A
 | Enter | Search the entered text, or open a supported Hardcover collection URL |
 | Tab / Shift+Tab | Next / previous search type |
 | Esc | Return to existing results; quit if there are none |
-| Alt+P / Alt+W / Alt+M | Open For you / Wishlist / Account |
+| Alt+P / Alt+W / Alt+M / Alt+N | Open For you / Wishlist / Account / New arrivals |
 | Alt+T | Cycle theme |
 
-Ordinary letters, including `q`, are text while Search is focused. Use Ctrl+C
+Ordinary letters, including `q`, are text while Search is focused. Use Ctrl+C or Ctrl+Q
 to quit directly.
 
 | Results key | Action |
@@ -121,7 +121,15 @@ holds or renew loans.
 | `c` | Search the catalog for this title across branches |
 | `r` | Refresh availability and Hardcover information |
 | `e` | Open your existing Hardcover record for editing |
+| `+` | Add the book to Hardcover's Want to Read, or remove it if already there |
 | `/` / `s` | Open Search |
+
+**`+` immediately changes your Hardcover library**, with no confirmation. It
+works on any book's details, including library catalog records, once the
+Hardcover lookup has matched the book. Shelfcheck checks your current Hardcover
+record first: a book on another shelf (Read, Currently reading, and so on) is
+left alone. Check the matched Hardcover title before pressing it, since the
+match may be a different edition.
 
 Availability is cached briefly, so repeated refreshes may reuse a recent
 response. Books from Libby or Hardcover without a catalog record can still
@@ -157,6 +165,17 @@ Restart the TUI after changing credentials or linking an account.
   absent from this catalog. The TUI requests up to 30 picks in English.
   `r` rebuilds recommendations; `h` opens the selected pick's Hardcover source
   when one exists. Books without catalog records open Hardcover details.
+- **New arrivals** (`n`) lists print books on a New Arrivals shelf at your home
+  branch now. It needs no account. Shelfcheck checks the 75 most recently added
+  adult English-language titles and shows up to 30 with a copy available on such a shelf;
+  the header says how many were checked, how many checks failed, and whether
+  more recent titles were left unscanned. With a reading record, books you
+  have read, borrowed, or placed on hold are dropped and the rest are ranked with reasons, using your
+  authors, series, genres, Want to Read shelf and, with `HARDCOVER_TOKEN`,
+  Hardcover's picks for you, ratings, and reader tags. `r` rescans. Enter opens
+  details, where `+` adds the book to Want to Read. `+` also works on a list
+  row that was already matched on Hardcover; otherwise it asks you to open the
+  book first.
 
 The first recommendation run can take a while; the progress message shows
 which source is being checked. Lists fill as checks finish. Source failures may
@@ -257,11 +276,12 @@ covers = "blocks"
 
 ## Shared shortcuts and SSH sessions
 
-On browsing screens, `p`, `w`, and `m` switch to For you, Wishlist, and Account;
-`t` cycles theme, `?` opens help, and `q` quits. The plain-letter navigation and
-theme shortcuts do not operate inside filters; Alt+P/W/M/T remain available.
+On browsing screens, `p`, `w`, `m`, and `n` switch to For you, Wishlist, Account,
+and New arrivals; `t` cycles theme, `?` opens help, and `q` quits. The plain-letter
+navigation and theme shortcuts do not operate inside filters; Alt+P/W/M/N/T remain
+available.
 An active Hardcover editor owns input, so review text does not trigger those
-shortcuts. Ctrl+C exits everywhere, including the editor.
+shortcuts. Ctrl+C and Ctrl+Q exit everywhere, including Search and the editor.
 
 When connecting to `shelfcheck serve` over SSH, catalog search and details work
 with the same keys. Personal accounts, Hardcover features, and recommendations

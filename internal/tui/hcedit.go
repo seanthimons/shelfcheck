@@ -254,16 +254,8 @@ func (m Model) handleHCEditSaved(msg hcEditSavedMsg) (Model, tea.Cmd) {
 		m.hcEdit.original = msg.entry
 	}
 	// Invalidate derived data even on ambiguous errors: the server might
-	// have saved a write whose response was lost. Drop old async results.
-	m.wishSeq++
-	m.wishLoading = false
-	m.wishTitles, m.wishItems, m.wishErr = nil, nil, nil
-	m.recSeq++
-	m.recLoading, m.recDone = false, false
-	m.recPicks, m.recErr = nil, nil
-	m.recProfile = recommend.Profile{}
-	m.recCursor = 0
-	m.clampAccountCursor()
+	// have saved a write whose response was lost.
+	m.dropHCDerived()
 	if msg.err != nil {
 		// A failed update may have changed fields. Reload the shelf snapshot
 		// once the retained editor draft is dismissed.
@@ -277,6 +269,38 @@ func (m Model) handleHCEditSaved(msg hcEditSavedMsg) (Model, tea.Cmd) {
 	m.flash = "Saved to Hardcover"
 	m.refreshDetail()
 	return m, nil
+}
+
+// dropHCDerived forgets what was worked out from the Hardcover library (the
+// wishlist and recommendations) after a write to it, and drops old async
+// results.
+func (m *Model) dropHCDerived() {
+	m.dropWishlist()
+	m.recSeq++
+	m.recLoading, m.recDone = false, false
+	m.recPicks, m.recErr = nil, nil
+	m.recProfile = recommend.Profile{}
+	m.recCursor = 0
+	m.clampAccountCursor()
+}
+
+// dropWishlist forgets the checked wishlist, which reads the Hardcover Want
+// to Read shelf, so it's checked afresh next time.
+func (m *Model) dropWishlist() {
+	m.wishSeq++
+	m.wishLoading = false
+	m.wishTitles, m.wishItems, m.wishErr = nil, nil, nil
+}
+
+// dropHCEntry forgets a library entry that was just removed.
+func (m *Model) dropHCEntry(bookID int) {
+	// A library snapshot requested before the removal must not bring it back.
+	if m.hcLibraryLoading {
+		m.hcLibrarySeq++
+		m.hcLibraryLoading = false
+	}
+	delete(m.hcLib, bookID)
+	delete(m.hc.shelves, bookID)
 }
 
 func (m *Model) cacheHCEntry(ub hardcover.UserBook) {

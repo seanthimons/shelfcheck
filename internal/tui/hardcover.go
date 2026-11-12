@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"shelfcheck/internal/account"
@@ -31,12 +32,15 @@ type (
 		shelves map[int]hardcover.UserBook
 		err     error
 	}
-	hcShelvedMsg struct {
-		seq    int
-		book   hardcover.PromptAnswer
-		entry  hardcover.UserBook // zero if removed
-		remove bool
-		err    error
+	// hcWantMsg is the result of a +, from any screen. It isn't tied to a
+	// screen's seq: a write that went through must be recorded wherever
+	// the patron has gone since.
+	hcWantMsg struct {
+		book    hardcover.Book
+		entry   hardcover.UserBook // the entry added, removed or left alone
+		removed bool
+		kept    bool // on another shelf, so left alone
+		err     error
 	}
 	hcCheckedMsg struct {
 		seq  int
@@ -55,7 +59,6 @@ type hcState struct {
 	col     *hardcover.Collection
 	shelves map[int]hardcover.UserBook // the patron's own Hardcover library, by book
 	note    string                     // result of the last + (shown until the next key)
-	busy    bool                       // a + is being saved
 	items   []account.WishItem         // checked so far, in collection order
 	failed  int
 	all     bool
@@ -134,27 +137,6 @@ func (m Model) handleHardcoverMsg(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.checkHardcover(0)
-	case hcShelvedMsg:
-		if msg.seq != m.hc.seq {
-			return m, nil
-		}
-		m.hc.busy = false
-		switch {
-		case msg.err != nil:
-			m.hc.note = errStyle.Render("Couldn't update Hardcover: " + msg.err.Error())
-			return m, nil
-		case msg.remove:
-			delete(m.hc.shelves, msg.book.ID)
-			m.hc.note = okStyle.Render("Took " + msg.book.Title + " off your Hardcover want to read")
-		default:
-			m.hc.shelves[msg.book.ID] = msg.entry
-			m.hc.note = okStyle.Render("Added " + msg.book.Title + " to your Hardcover want to read")
-		}
-		// The wishlist reads that shelf: check it afresh next time.
-		if !m.wishLoading {
-			m.wishTitles, m.wishItems = nil, nil
-		}
-		return m, nil
 	case hcCheckedMsg:
 		if msg.seq != m.hc.seq {
 			return m, nil
@@ -186,13 +168,13 @@ func (m Model) hcVisible() []int {
 func (m Model) updateHardcover(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	vis := m.hcVisible()
 	h := max(1, m.listHeight())
-	if !m.hc.busy {
+	if !m.hcWantBusy {
 		m.hc.note = ""
 	}
 	switch msg.String() {
 	case "+":
-		if m.hc.cursor < len(vis) && !m.hc.busy {
-			return m.toggleWant(m.hc.col.Books[vis[m.hc.cursor]])
+		if m.hc.cursor < len(vis) {
+			return m.toggleWant(m.hc.col.Books[vis[m.hc.cursor]].Book)
 		}
 	case "q":
 		return m, tea.Quit
@@ -240,36 +222,97 @@ func (m Model) updateHardcover(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // toggleWant puts b on the Hardcover Want to Read shelf, or takes it off if
 // it's there. Books on another shelf (read, did not finish...) are left be.
-func (m Model) toggleWant(b hardcover.PromptAnswer) (tea.Model, tea.Cmd) {
+// It asks Hardcover where the book stands first, so a stale or unloaded
+// library can't add a second entry or remove the wrong one.
+func (m Model) toggleWant(b hardcover.Book) (Model, tea.Cmd) {
 	var hc *hardcover.Client
 	if m.acct != nil {
 		hc = m.acct.HardcoverClient()
 	}
-	entry, has := m.hc.shelves[b.ID]
 	switch {
 	case hc == nil:
-		m.hc.note = errStyle.Render("Set HARDCOVER_TOKEN to change your Hardcover shelves")
+		m.wantNote(errStyle, "Set HARDCOVER_TOKEN to change your Hardcover shelves")
 		return m, nil
 	case b.ID == 0:
 		return m, nil
-	case has && entry.Status != hardcover.WantToRead:
-		m.hc.note = dimStyle.Render(b.Title + " is already on your Hardcover as " + entry.Status.String())
+	case m.hcWantBusy:
+		m.wantNote(dimStyle, "Still updating Hardcover…")
 		return m, nil
 	}
-	m.hc.busy = true
-	m.hc.note = dimStyle.Render("Updating Hardcover…")
-	seq := m.hc.seq
+	m.hcWantBusy = true
+	m.wantNote(dimStyle, "Updating Hardcover…")
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
-		if has {
-			err := hc.RemoveFromLibrary(ctx, entry.UserBookID)
-			return hcShelvedMsg{seq: seq, book: b, remove: true, err: err}
+		entry, has, err := hc.UserBook(ctx, b.ID)
+		switch {
+		case err != nil:
+			return hcWantMsg{book: b, err: err}
+		case has && entry.Status != hardcover.WantToRead:
+			return hcWantMsg{book: b, entry: entry, kept: true}
+		case has:
+			return hcWantMsg{book: b, entry: entry, removed: true, err: hc.RemoveFromLibrary(ctx, entry.UserBookID)}
 		}
 		id, err := hc.AddToShelf(ctx, b.ID, hardcover.WantToRead)
-		return hcShelvedMsg{seq: seq, book: b, err: err,
-			entry: hardcover.UserBook{Book: b.Book, UserBookID: id, Status: hardcover.WantToRead}}
+		return hcWantMsg{book: b, err: err, entry: hardcover.UserBook{Book: b, UserBookID: id, Status: hardcover.WantToRead}}
 	}
+}
+
+// wantNote shows the state of a +: under the Hardcover screen's heading,
+// or in the footer anywhere else.
+func (m *Model) wantNote(style lipgloss.Style, text string) {
+	if m.screen == hardcoverScreen {
+		m.hc.note = style.Render(text)
+		return
+	}
+	m.flash = text
+}
+
+func (m Model) handleHCWant(msg hcWantMsg) Model {
+	m.hcWantBusy = false
+	switch {
+	case msg.err != nil:
+		// The write may have gone through all the same: reload the shelves
+		// and what's worked out from them.
+		m.hcLibrarySeq++
+		m.hcLibraryLoading, m.hcLibraryLoaded = false, false
+		m.dropWishlist()
+		m.wantNote(errStyle, "Couldn't update Hardcover: "+msg.err.Error())
+	case msg.kept:
+		m.cacheHCEntry(msg.entry)
+		m.wantNote(dimStyle, msg.book.Title+" is already on your Hardcover as "+msg.entry.Status.String())
+	case msg.removed:
+		m.dropHCEntry(msg.book.ID)
+		m.dropWishlist()
+		m.wantNote(okStyle, "Took "+msg.book.Title+" off your Hardcover want to read")
+	default:
+		m.cacheHCEntry(msg.entry)
+		m.dropWishlist()
+		m.wantNote(okStyle, "Added "+msg.book.Title+" to your Hardcover want to read")
+	}
+	if m.screen == detailScreen {
+		m.refreshDetail()
+	}
+	return m
+}
+
+// wantSelected is + on the detail screen: the selected book, as Hardcover
+// knows it, goes on (or comes off) Want to Read.
+func (m Model) wantSelected() (Model, tea.Cmd) {
+	h := m.hcInfo[m.detailKey()]
+	switch {
+	case m.acct == nil || m.acct.HardcoverClient() == nil:
+		m.flash = "Set HARDCOVER_TOKEN to change your Hardcover shelves"
+	case h == nil || h.loading:
+		m.flash = "Still looking this book up on Hardcover; press + when it loads"
+	case h.err != nil:
+		m.flash = "Hardcover lookup failed: " + h.err.Error() + "; r retries it"
+	case !h.ok || h.info.ID == 0:
+		m.flash = "No matching book found on Hardcover; r retries the lookup"
+	default:
+		return m.toggleWant(h.info.Book)
+	}
+	return m, nil
 }
 
 func (m Model) viewHardcover() string {
