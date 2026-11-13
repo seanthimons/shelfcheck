@@ -172,7 +172,9 @@ shelfcheck json branches -library cincinnatilibrary | jq '.[] | {code, name}'
 ```
 
 Returns an array with `code`, `name`, `address`, `hours`, and optional `phone`
-and `url`. Pass a returned code as `-home`; do not assume codes are universal.
+and `url`. Results include all API pages and exclude hidden locations. If any
+page fails, the command fails rather than returning an incomplete branch list.
+Pass a returned code as `-home`; do not assume codes are universal.
 
 ### `json history`, `json checkouts`, `json holds`
 

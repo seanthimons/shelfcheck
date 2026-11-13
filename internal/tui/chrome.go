@@ -188,6 +188,12 @@ func (m Model) screenKeys() []key.Binding {
 	if m.hcEdit.active {
 		return []key.Binding{kb("ctrl+s", "save"), kb("tab", "next field"), kb("shift+tab", "previous field"), kb("esc", "cancel")}
 	}
+	if m.panel == panelCategories {
+		return []key.Binding{kb("↑↓", "move"), kb("enter", "choose"), kb("x", "clear one"), kb("c", "clear all"), kb("esc", "apply")}
+	}
+	if m.panel == panelValues {
+		return []key.Binding{kb("↑↓", "move"), kb("space", "toggle"), kb("esc", "back")}
+	}
 	nav := []key.Binding{kb("n", "new arrivals"), kb("p", "for you"), kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}
 	switch m.screen {
 	case searchScreen:
@@ -198,12 +204,6 @@ func (m Model) screenKeys() []key.Binding {
 		return []key.Binding{kb("enter", "search"), kb("tab", "type"), esc,
 			kb("alt+n", "new arrivals"), kb("alt+p", "for you"), kb("alt+w", "wishlist"), kb("alt+m", "account"), kb("alt+t", "theme"), kb("ctrl+q", "quit")}
 	case resultsScreen:
-		switch m.panel {
-		case panelCategories:
-			return []key.Binding{kb("↑↓", "move"), kb("enter", "choose"), kb("x", "clear one"), kb("c", "clear all"), kb("esc", "apply")}
-		case panelValues:
-			return []key.Binding{kb("↑↓", "move"), kb("space", "toggle"), kb("esc", "back")}
-		}
 		ks := []key.Binding{kb("enter", "open"), kb("f", "filters")}
 		if m.q.Narrowed() || m.q.Sort != "" {
 			ks = append(ks, kb("F", "clear filters"))
@@ -233,19 +233,19 @@ func (m Model) screenKeys() []key.Binding {
 		}
 		return append(ks, kb("pgup/pgdown", "page"), kb("h", "sections"), kb("/", "search"), kb("esc", "search"))
 	case forYouScreen:
-		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("h", "Hardcover source"), kb("r", "refresh"),
+		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("f", "filters"), kb("F", "clear filters"), kb("h", "Hardcover source"), kb("r", "refresh"),
 			kb("w", "wishlist"), kb("m", "account"), kb("/", "search")}
 	case hardcoverScreen:
-		return append([]key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("+", "want to read"), kb("A", "show all"),
+		return append([]key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("f", "filters"), kb("F", "clear filters"), kb("+", "want to read"), kb("A", "show all"),
 			kb("r", "recheck"), kb("esc", "back")}, nav...)
 	case arrivalsScreen:
-		ks := []key.Binding{kb("↑↓", "move"), kb("enter", "open")}
+		ks := []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("f", "filters"), kb("F", "clear filters")}
 		if m.acct != nil && m.acct.HasHardcover() {
 			ks = append(ks, kb("+", "want to read"))
 		}
 		return append(append(ks, kb("r", "rescan")), nav...)
 	case wishlistScreen:
-		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("A", "show all"), kb("r", "recheck"),
+		return []key.Binding{kb("↑↓", "move"), kb("enter", "open"), kb("f", "filters"), kb("F", "clear filters"), kb("A", "show all"), kb("r", "recheck"),
 			kb("p", "for you"), kb("m", "account"), kb("/", "search")}
 	}
 	return nil

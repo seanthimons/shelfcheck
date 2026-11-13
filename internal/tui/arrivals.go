@@ -125,7 +125,8 @@ func (m Model) handleArrivalsMsg(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) updateArrivals(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	n := len(m.arr.res.Items)
+	items := m.visibleArrivals()
+	n := len(items)
 	h := max(1, m.listHeight()/2)
 	switch msg.String() {
 	case "q":
@@ -150,7 +151,7 @@ func (m Model) updateArrivals(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.arr.cursor = n - 1
 	case "+":
 		if m.arr.cursor < n {
-			a := m.arr.res.Items[m.arr.cursor]
+			a := items[m.arr.cursor]
 			if a.HardcoverID == 0 {
 				// ponytail: no lookup from the list; the detail view already does one.
 				m.flash = "Not matched on Hardcover yet; press enter, then + on the book's details"
@@ -164,7 +165,7 @@ func (m Model) updateArrivals(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter", "right", "l":
 		if m.arr.cursor < n {
-			return m.openBib(m.arr.res.Items[m.arr.cursor].Bib, arrivalsScreen)
+			return m.openBib(items[m.arr.cursor].Bib, arrivalsScreen)
 		}
 	}
 	m.arr.cursor = max(0, min(m.arr.cursor, n-1))
@@ -182,14 +183,15 @@ func shelfName(collection string) string {
 
 func (m Model) viewArrivals() string {
 	res := m.arr.res
+	res.Items = m.visibleArrivals()
 	switch {
 	case m.arr.err != nil:
 		return m.notice(errStyle.Render("Couldn't scan the new arrivals: "+m.arr.err.Error()) + "\n\nPress r to try again.")
 	case len(res.Items) == 0 && m.arr.loading:
 		return m.notice(m.spin.View() + fmt.Sprintf(" Checking recently added books for copies on the new shelves… %d checked", res.Checked))
 	case len(res.Items) == 0:
-		return m.notice(titleStyle.Render("Nothing found on the new shelves at "+m.homeName+".") +
-			"\n\n" + dimStyle.Render(m.arrivalsScope()) + "\n\nPress r to scan again.")
+		return m.notice(titleStyle.Render("No matching books on the new shelves at "+m.homeName+".") +
+			"\n\n" + dimStyle.Render(m.arrivalsScope()) + "\n\nPress f to adjust filters, F to clear, or r to scan again.")
 	}
 
 	head := "  " + titleStyle.Render("New arrivals") + dimStyle.Render(" · on the new shelves at "+m.homeName+" · "+m.arrivalsScope())
@@ -230,6 +232,7 @@ func (m Model) viewArrivals() string {
 // bounded scan, not an inventory of the shelf.
 func (m Model) arrivalsScope() string {
 	res := m.arr.res
+	res.Items = m.visibleArrivals()
 	s := fmt.Sprintf("%s checked", plural(res.Checked, "recent title"))
 	if res.Failed > 0 {
 		s += fmt.Sprintf(", %d couldn't be", res.Failed)

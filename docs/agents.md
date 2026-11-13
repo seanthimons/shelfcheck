@@ -18,7 +18,10 @@ Library and branch defaults are `cincinnatilibrary` and `1` (its Main Library).
 `library` and `home` in `config.toml` override those defaults. Pass `-library`
 and `-home` explicitly for reproducible catalog and branch selection. Invalid
 or unreadable config files cause catalog commands to fail.
-These flags belong to individual commands, not before `json`.
+These flags belong to individual commands, not before `json`. Toronto Public
+Library uses `-library tpl`; discover its branch codes with `json branches
+-library tpl`. Branch listings fetch every page and fail if a page cannot be
+retrieved.
 
 Successful data commands write one indented JSON value to stdout. Diagnostics,
 warnings and help go to stderr. Errors produce a nonzero exit; help exits

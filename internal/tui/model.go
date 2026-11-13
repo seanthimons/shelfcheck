@@ -64,11 +64,12 @@ type Model struct {
 	searching   bool
 	loadingMore bool
 
-	// Filter panel, opened with f on the results screen; see filters.go.
-	panel     panelState
-	draft     bc.Query
-	catCursor int
-	valCursor int
+	// Shared filter panel, opened with f on results and discovery lists.
+	listFilters map[screen]bc.Query // session filters for each discovery list
+	panel       panelState
+	draft       bc.Query
+	catCursor   int
+	valCursor   int
 
 	// Per-bib data, shared by the results list (home-branch marker) and the
 	// detail screen.
@@ -410,6 +411,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "?" && m.screen != searchScreen {
 			m.showHelp = true
 			return m, nil
+		}
+		if m.panel != panelClosed {
+			return m.updatePanel(msg)
+		}
+		if m.localFilters() {
+			switch msg.String() {
+			case "f":
+				return m.openPanel(), nil
+			case "F":
+				return m.applyListFilters(bc.Query{}), nil
+			}
 		}
 		if mm, cmd, ok := m.navKey(msg.String()); ok {
 			return mm, cmd

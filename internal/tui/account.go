@@ -203,7 +203,9 @@ func (m Model) wishVisible() []account.WishItem {
 	var out []account.WishItem
 	for _, w := range m.wishItems {
 		if w.Available() || m.wishAll {
-			out = append(out, w)
+			if filtered, ok := filterWish(w, m.listFilters[wishlistScreen]); ok {
+				out = append(out, filtered)
+			}
 		}
 	}
 	return out
@@ -283,7 +285,7 @@ func (m Model) viewWishlist() string {
 	items := m.wishVisible()
 	avail := 0
 	for _, w := range m.wishItems {
-		if w.Available() {
+		if filtered, ok := filterWish(w, m.listFilters[wishlistScreen]); ok && filtered.Available() {
 			avail++
 		}
 	}
@@ -306,7 +308,7 @@ func (m Model) viewWishlist() string {
 	if len(items) == 0 {
 		rows := []string{head, sub}
 		if !m.wishLoading {
-			rows = append(rows, "", dimStyle.Render("  Nothing on your list is available right now."))
+			rows = append(rows, "", dimStyle.Render("  No titles match the current availability and filters. Press f to adjust or F to clear filters."))
 		}
 		return strings.Join(rows, "\n")
 	}

@@ -158,7 +158,7 @@ func (m Model) handleHardcoverMsg(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) hcVisible() []int {
 	var out []int
 	for i, it := range m.hc.items {
-		if it.Available() || m.hc.all {
+		if _, ok := filterWish(it, m.listFilters[hardcoverScreen]); ok && (it.Available() || m.hc.all) {
 			out = append(out, i)
 		}
 	}
@@ -208,6 +208,7 @@ func (m Model) updateHardcover(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter", "right", "l":
 		if m.hc.cursor < len(vis) {
 			it, b := m.hc.items[vis[m.hc.cursor]], m.hc.col.Books[vis[m.hc.cursor]]
+			it, _ = filterWish(it, m.listFilters[hardcoverScreen])
 			if bib, ok := bestMatch(it); ok {
 				return m.openBib(bib, hardcoverScreen)
 			}
@@ -325,7 +326,7 @@ func (m Model) viewHardcover() string {
 	col := m.hc.col
 	avail := 0
 	for _, it := range m.hc.items {
-		if it.Available() {
+		if filtered, ok := filterWish(it, m.listFilters[hardcoverScreen]); ok && filtered.Available() {
 			avail++
 		}
 	}
@@ -351,7 +352,7 @@ func (m Model) viewHardcover() string {
 	if len(vis) == 0 {
 		rows := []string{head, sub}
 		if !m.hc.loading {
-			rows = append(rows, "", dimStyle.Render("  None of these are available right now. A shows them all."))
+			rows = append(rows, "", dimStyle.Render("  No titles match the current availability and filters. Press f to adjust or F to clear filters; A includes unavailable titles."))
 		}
 		return strings.Join(rows, "\n")
 	}
@@ -379,6 +380,7 @@ func (m Model) hcLine(i, w int) string {
 	case b.Votes > 1:
 		label = fmt.Sprintf("%d picks", b.Votes)
 	}
+	it, _ = filterWish(it, m.listFilters[hardcoverScreen])
 	bib, ok := bestMatch(it)
 	if !ok {
 		bib = bc.Bib{Title: it.Tagging.Title, Authors: []string{it.Tagging.Author}}

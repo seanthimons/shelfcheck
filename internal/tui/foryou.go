@@ -127,27 +127,30 @@ func (m Model) handleRecMsg(msg tea.Msg) (Model, tea.Cmd) {
 // forYouRows counts the selectable rows: picks, then Hardcover's picks the
 // library has but not on the shelf now, then ones it doesn't have.
 func (m Model) forYouRows() int {
-	return len(m.recPicks) + len(m.recProfile.NotOnShelf) + len(m.recProfile.ToBuy)
+	picks, profile := m.visibleRecommendations()
+	return len(picks) + len(profile.NotOnShelf) + len(profile.ToBuy)
 }
 
 // elsewhereAt returns the not-on-the-shelf or to-buy entry at row i, if
 // row i is one.
 func (m Model) elsewhereAt(i int) (recommend.Elsewhere, bool) {
-	i -= len(m.recPicks)
+	picks, profile := m.visibleRecommendations()
+	i -= len(picks)
 	if i < 0 {
 		return recommend.Elsewhere{}, false
 	}
-	if i < len(m.recProfile.NotOnShelf) {
-		return m.recProfile.NotOnShelf[i], true
+	if i < len(profile.NotOnShelf) {
+		return profile.NotOnShelf[i], true
 	}
-	i -= len(m.recProfile.NotOnShelf)
-	if i < len(m.recProfile.ToBuy) {
-		return m.recProfile.ToBuy[i], true
+	i -= len(profile.NotOnShelf)
+	if i < len(profile.ToBuy) {
+		return profile.ToBuy[i], true
 	}
 	return recommend.Elsewhere{}, false
 }
 
 func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	picks, _ := m.visibleRecommendations()
 	n := m.forYouRows()
 	h := max(1, m.listHeight()/2)
 	switch msg.String() {
@@ -172,8 +175,8 @@ func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "end", "G":
 		m.recCursor = n - 1
 	case "enter", "right", "l":
-		if m.recCursor < len(m.recPicks) {
-			return m.openBib(m.recPicks[m.recCursor].Bib, forYouScreen)
+		if m.recCursor < len(picks) {
+			return m.openBib(picks[m.recCursor].Bib, forYouScreen)
 		}
 		if u, ok := m.elsewhereAt(m.recCursor); ok {
 			if u.Bib.ID != "" {
@@ -183,8 +186,8 @@ func (m Model) updateForYou(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "h":
 		from := ""
-		if m.recCursor < len(m.recPicks) {
-			from = m.recPicks[m.recCursor].From
+		if m.recCursor < len(picks) {
+			from = picks[m.recCursor].From
 		} else if u, ok := m.elsewhereAt(m.recCursor); ok {
 			from = u.From
 		}
@@ -203,11 +206,15 @@ func (m Model) viewForYou() string {
 			"\n\nSet up your library login (shelfcheck login), Libby (shelfcheck libby link <code>)\nand/or Hardcover (HARDCOVER_TOKEN).")
 	case m.recErr != nil && len(m.recPicks) == 0:
 		return m.notice(errStyle.Render("Couldn't build recommendations: "+m.recErr.Error()) + "\n\nPress r to try again.")
-	case len(m.recPicks) == 0:
+	case len(m.recPicks) == 0 && m.recLoading:
 		return m.notice(m.spin.View() + " " + capitalize(m.recStage) + "…" +
 			"\n\n" + dimStyle.Render("This takes about half a minute the first time."))
 	}
 
+	m.recPicks, m.recProfile = m.visibleRecommendations()
+	if m.forYouRows() == 0 && !m.recLoading {
+		return m.notice("No recommendations match the current filters. Press f to adjust or F to clear filters.")
+	}
 	head := "  " + titleStyle.Render("For you") + dimStyle.Render(" · on the shelf at "+m.homeName+", or ebooks to borrow now")
 	if m.recLoading {
 		head += dimStyle.Render(" · "+m.recStage+" ") + m.spin.View()

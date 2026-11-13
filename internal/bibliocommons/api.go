@@ -188,18 +188,24 @@ func (c *Client) Availability(ctx context.Context, bibID string) (*Availability,
 
 // Locations returns all branches, in the library's own order.
 func (c *Client) Locations(ctx context.Context) ([]Location, error) {
-	var raw rawLocations
-	params := url.Values{"limit": {"100"}}
-	if err := c.getJSON(ctx, "locations", params, locationsTTL, &raw); err != nil {
-		return nil, err
-	}
-	if p := raw.Locations.Pagination; p.Pages > 1 {
-		return nil, fmt.Errorf("bibliocommons: %d locations span %d pages; paging not implemented", p.Count, p.Pages)
-	}
 	var out []Location
-	for _, code := range raw.Locations.Results {
-		if l, ok := raw.Entities.Locations[code]; ok && !l.IsHidden {
-			out = append(out, l.toLocation())
+	pages := 1
+	for page := 1; page <= pages; page++ {
+		var raw rawLocations
+		params := url.Values{"limit": {"100"}, "page": {strconv.Itoa(page)}}
+		if err := c.getJSON(ctx, "locations", params, locationsTTL, &raw); err != nil {
+			return nil, err
+		}
+		if page == 1 {
+			pages = raw.Locations.Pagination.Pages
+		}
+		if pages > 1 && raw.Locations.Pagination.Page != page {
+			return nil, fmt.Errorf("bibliocommons: requested locations page %d, got %d", page, raw.Locations.Pagination.Page)
+		}
+		for _, code := range raw.Locations.Results {
+			if l, ok := raw.Entities.Locations[code]; ok && !l.IsHidden {
+				out = append(out, l.toLocation())
+			}
 		}
 	}
 	return out, nil

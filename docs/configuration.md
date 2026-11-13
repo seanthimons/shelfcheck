@@ -30,6 +30,22 @@ catalog commands with an error. The local TUI starts with home-shelf filtering;
 use `-home-only` to restrict it. Other JSON discovery commands have their own
 availability rules; see the [CLI reference](cli.md).
 
+### Toronto Public Library
+
+Toronto's catalog uses the `tpl` library slug. Public searches and copy
+availability need no library card or Hardcover token. Find a branch code first:
+
+```sh
+./shelfcheck json branches -library tpl
+./shelfcheck json search -library tpl -home AB -home-only -format book dune
+./shelfcheck -library tpl -home AB
+```
+
+`AB` is Albion; replace it with your preferred branch's code. To save that
+selection, set `library = "tpl"` and `home = "AB"` in `config.toml`.
+Branch lists include all API pages, with hidden locations excluded. Toronto
+account login and borrowing history have not been verified.
+
 ## File locations
 
 Shelfcheck uses Go's platform configuration and cache directories. On Linux,

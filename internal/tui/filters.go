@@ -10,8 +10,8 @@ import (
 	bc "shelfcheck/internal/bibliocommons"
 )
 
-// The filter panel (f on the results screen) edits a draft copy of the
-// query. Changes apply when the panel closes.
+// The filter panel edits a draft query for search or the current discovery list.
+// Changes apply when the panel closes.
 
 type panelState int
 
@@ -82,7 +82,7 @@ func (m Model) options(c category) []option {
 		add("_physical_", m.facetCount(c.field, "_physical_"))
 		add("_online_", m.facetCount(c.field, "_online_"))
 	}
-	for _, f := range m.facets[c.field] {
+	for _, f := range m.panelFacets()[c.field] {
 		add(f.Value, f.Count)
 	}
 	for _, v := range m.draft.Filters[c.field] {
@@ -92,7 +92,7 @@ func (m Model) options(c category) []option {
 }
 
 func (m Model) facetCount(field, value string) int {
-	for _, f := range m.facets[field] {
+	for _, f := range m.panelFacets()[field] {
 		if f.Value == value {
 			return f.Count
 		}
@@ -102,9 +102,13 @@ func (m Model) facetCount(field, value string) int {
 
 // visibleCategories hides categories with nothing to pick.
 func (m Model) visibleCategories() []category {
+	facets := m.panelFacets()
 	var out []category
 	for _, c := range categories {
-		if c.field == "" || c.field == bc.FacetStatus || len(m.facets[c.field]) > 0 || len(m.draft.Filters[c.field]) > 0 {
+		if m.localFilters() && (c.field == "" || c.field == bc.FacetStatus || c.field == bc.FacetNew) {
+			continue
+		}
+		if c.field == "" || c.field == bc.FacetStatus || len(facets[c.field]) > 0 || len(m.draft.Filters[c.field]) > 0 {
 			out = append(out, c)
 		}
 	}
@@ -205,7 +209,7 @@ func (m Model) filterSummary(q bc.Query) string {
 // --- update -----------------------------------------------------------------
 
 func (m Model) openPanel() Model {
-	m.draft = m.q.Clone()
+	m.draft = m.activeFilters().Clone()
 	m.panel = panelCategories
 	m.catCursor = 0
 	return m
@@ -239,6 +243,9 @@ func (m Model) updatePanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.draft.Filters, m.draft.Sort = nil, ""
 		case "esc", "f":
 			m.panel = panelClosed
+			if m.localFilters() {
+				return m.applyListFilters(m.draft), nil
+			}
 			return m.runQuery(m.draft)
 		}
 		return m, nil
@@ -322,7 +329,7 @@ func (m Model) viewPanel() string {
 	nameW := 16
 
 	if m.panel == panelCategories {
-		rows := []string{ansi.Truncate("Filter "+titleStyle.Render(fmt.Sprintf("%q", m.q.Text)), w, "…"), ""}
+		rows := []string{ansi.Truncate("Filter "+titleStyle.Render(fmt.Sprintf("%q", m.filterTitle())), w, "…"), ""}
 		for i, c := range cats {
 			line := pad(c.name, nameW) + " " + accentStyle.Render(pad(m.summary(m.draft, c), max(10, w-nameW-3)))
 			rows = append(rows, cursorRow(i == m.catCursor, line))
@@ -330,7 +337,7 @@ func (m Model) viewPanel() string {
 		return box(strings.Join(rows, "\n"), accentColor)
 	}
 
-	rows := []string{ansi.Truncate(titleStyle.Render(cat.name)+dimStyle.Render(fmt.Sprintf(" · filtering %q", m.q.Text)), w, "…"), ""}
+	rows := []string{ansi.Truncate(titleStyle.Render(cat.name)+dimStyle.Render(fmt.Sprintf(" · filtering %q", m.filterTitle())), w, "…"), ""}
 	opts := m.options(cat)
 	h := min(len(opts), m.panelListHeight())
 	start := max(0, min(m.valCursor-h+1, len(opts)-h))

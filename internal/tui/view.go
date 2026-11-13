@@ -35,7 +35,13 @@ func init() { ApplyTheme(theme.Theme{Name: theme.Terminal}) }
 // The body is what's between the header (a line and its rule) and the
 // footer; lists in it have two lines of heading and a row of column labels.
 func (m Model) bodyHeight() int { return max(1, m.height-3) }
-func (m Model) listHeight() int { return max(1, m.bodyHeight()-3) }
+func (m Model) listHeight() int {
+	height := m.bodyHeight() - 3
+	if m.localFilters() && m.activeFilters().Narrowed() {
+		height--
+	}
+	return max(1, height)
+}
 
 func (m Model) View() tea.View {
 	var body string
@@ -56,6 +62,14 @@ func (m Model) View() tea.View {
 		body = m.viewHardcover()
 	case arrivalsScreen:
 		body = m.viewArrivals()
+	}
+	if m.localFilters() {
+		if summary := m.filterSummary(m.activeFilters()); summary != "" {
+			body = "  " + accentStyle.Render(ansi.Truncate("Filters: "+summary+" · F clears", max(1, m.width-4), "…")) + "\n" + body
+		}
+		if m.panel != panelClosed {
+			body = m.overlay(body, m.viewPanel())
+		}
 	}
 	if m.hcEdit.active {
 		body = m.viewHCEditor()

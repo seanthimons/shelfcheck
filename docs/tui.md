@@ -96,6 +96,34 @@ added, Title, and Author.
 | Values | Enter / Space | Toggle a value; choosing sort returns to categories |
 | Values | Esc / Left / `h` / Backspace | Return to categories |
 
+The same `f` panel is available in **Wishlist**, **For you**, **Hardcover
+collections**, and **New arrivals**. For an ebooks-only wishlist:
+
+1. Open Wishlist with `w` or Alt+W.
+2. Press `f`, open **Format**, and toggle **eBook** with Space or Enter.
+3. Press Esc twice to return through categories and apply the filter.
+
+These list panels offer Format, Genre, Rating, Fiction, Audience, Year, Language,
+and Author when that metadata is present. Multiple values in one category are
+ORed; categories are ANDed against the same catalog edition. A title available
+in both print and ebook stays visible under eBook, and Enter opens its matching
+ebook edition. Rows and availability labels reflect the matching editions.
+
+List filters apply to the results loaded so far, preserving recommendation and
+collection order. They do not expand the source scan: Wishlist and For you check
+print books and ebooks, For you checks English titles, and New arrivals scans
+adult English print books. Local facet counts describe loaded editions, so a
+work with multiple editions can contribute more than once. Unknown metadata
+cannot satisfy a selected filter, including titles without a catalog match.
+`A` in Wishlist and Hardcover collections includes unavailable titles but still
+respects metadata filters. Availability and Recently added remain catalog-search
+filters; local lists keep their existing availability rules.
+
+Active filters appear above each list. `F` clears that screen's filters. Each
+list keeps its own selections while navigating and refreshing within this run;
+selections are not saved between runs. No new account requests are made when
+applying list filters. Search filters continue to rerun the catalog query.
+
 Your current home filter becomes the default for subsequent searches within
 this session. Other filters and sort do not carry into a fresh search. These
 search preferences are not saved between runs.

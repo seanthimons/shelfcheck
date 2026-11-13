@@ -3,6 +3,7 @@ package recommend
 import (
 	"testing"
 
+	"shelfcheck/internal/account"
 	bc "shelfcheck/internal/bibliocommons"
 )
 
@@ -43,5 +44,18 @@ func TestElsewhereStatus(t *testing.T) {
 		if got := c.u.Status(); got != c.want {
 			t.Errorf("Status(%+v) = %q, want %q", c.u.Bib.Summary, got, c.want)
 		}
+	}
+}
+
+func TestPickRetainsAvailableEditions(t *testing.T) {
+	e := &engine{rec: &account.Record{}, picks: map[string]*Pick{}, ahead: map[string]bool{}}
+	print := bc.Bib{ID: "print", Title: "Example", Authors: []string{"Author"}, Format: "BK"}
+	ebook := print
+	ebook.ID, ebook.Format, ebook.Digital = "ebook", "EBOOK", true
+	e.add(ebook, "genre", 1, "genre")
+	p := e.add(print, "author", 2, "author")
+	e.add(ebook, "wish", 3, "wishlist")
+	if !p.Print || !p.Ebook || p.Bib.ID != "print" || len(p.Editions) != 2 {
+		t.Fatalf("merged pick lost editions: %+v", p)
 	}
 }

@@ -85,11 +85,12 @@ func (o Options) withDefaults() Options {
 
 // Pick is one recommended work, with its available copies merged.
 type Pick struct {
-	Bib     bc.Bib // the print record when one is on the shelf, else the ebook
-	Print   bool   // a print copy is on the shelf at home
-	Ebook   bool   // an ebook can be borrowed now
-	Score   float64
-	Reasons []string
+	Bib      bc.Bib   // the print record when one is on the shelf, else the ebook
+	Editions []bc.Bib // available editions, retained for format and metadata filtering
+	Print    bool     // a print copy is on the shelf at home
+	Ebook    bool     // an ebook can be borrowed now
+	Score    float64
+	Reasons  []string
 	// From is the Hardcover prompt, list or vibe behind a Hardcover reason
 	// ("readers also picked", "Hardcover recommends"), as a URL.
 	From string
@@ -392,6 +393,16 @@ func (e *engine) add(b bc.Bib, kind string, score float64, text string) *Pick {
 	if p == nil {
 		p = &Pick{Bib: b, key: k, why: map[string]reason{}}
 		e.picks[k] = p
+	}
+	seenEdition := false
+	for _, edition := range p.Editions {
+		if edition.ID == b.ID {
+			seenEdition = true
+			break
+		}
+	}
+	if !seenEdition {
+		p.Editions = append(p.Editions, b)
 	}
 	digital := b.Digital || account.DigitalFormats[b.Format]
 	if digital {
@@ -786,6 +797,7 @@ func (e *engine) ranked() []Pick {
 	var all []Pick
 	for _, p := range e.picks {
 		pp := *p
+		pp.Editions = append([]bc.Bib(nil), p.Editions...)
 		rs := make([]reason, 0, len(p.why))
 		for _, r := range p.why {
 			pp.Score += r.score

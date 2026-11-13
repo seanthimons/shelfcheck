@@ -354,6 +354,67 @@ func TestLocations(t *testing.T) {
 	}
 }
 
+func TestLocationsPagination(t *testing.T) {
+	for _, mode := range []string{"success", "later page fails", "repeated page"} {
+		t.Run(mode, func(t *testing.T) {
+			var requested []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("limit") != "100" {
+					t.Errorf("limit = %q", r.URL.Query().Get("limit"))
+				}
+				page := r.URL.Query().Get("page")
+				if page == "" {
+					page = "1"
+				}
+				requested = append(requested, page)
+				w.Header().Set("Content-Type", "application/json")
+				switch page {
+				case "1":
+					fmt.Fprint(w, `{"locations":{"results":["AB","hidden"],"pagination":{"count":3,"pages":2,"page":1}},"entities":{"locations":{"AB":{"id":"AB","name":"Albion"},"hidden":{"id":"hidden","isHidden":true}}}}`)
+				case "2":
+					if mode == "later page fails" {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					returnedPage := 2
+					if mode == "repeated page" {
+						returnedPage = 1
+					}
+					fmt.Fprintf(w, `{"locations":{"results":["CC"],"pagination":{"count":3,"pages":2,"page":%d}},"entities":{"locations":{"CC":{"id":"CC","name":"Cliffcrest"}}}}`, returnedPage)
+				default:
+					t.Errorf("unexpected page %q", page)
+					http.Error(w, "unexpected page", http.StatusBadRequest)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			c := New("testlib")
+			c.BaseURL = srv.URL
+			locs, err := c.Locations(context.Background())
+			if mode != "success" {
+				if err == nil || locs != nil {
+					t.Fatalf("expected error without partial locations, got %v, %v", locs, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(locs) != 2 || locs[0].Code != "AB" || locs[1].Code != "CC" {
+				t.Fatalf("locations = %+v", locs)
+			}
+			if strings.Join(requested, ",") != "1,2" {
+				t.Fatalf("requested pages = %v", requested)
+			}
+			if _, err := c.Locations(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(requested) != 2 {
+				t.Fatalf("cached locations made extra requests: %v", requested)
+			}
+		})
+	}
+}
+
 func TestCacheAvoidsSecondRequest(t *testing.T) {
 	var hits atomic.Int32
 	c := fixtureServer(t, &hits)
