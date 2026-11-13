@@ -73,6 +73,19 @@ Store complete outputs when auditing results, and check the command's exit statu
 before running the next step. These files can contain private data when using
 account commands; choose a private destination for those outputs.
 
+## Book recommendation skill
+
+[`skills/library-books`](../skills/library-books/SKILL.md) is an
+[Agent Skill](https://agentskills.io) that recommends books on the shelf at your
+home branch, using your reading record, Libby tags, wishlist, and a `taste.md`
+notes file it keeps in the Shelfcheck config directory. It needs `shelfcheck` on
+`PATH` and uses the `library` and `home` saved in `config.toml`. For Claude Code,
+copy or symlink the directory into `~/.claude/skills/`:
+
+```sh
+ln -s "$PWD/skills/library-books" ~/.claude/skills/library-books
+```
+
 ## Interpreting completeness and availability
 
 Ordinary searches return a page of 25 results. `-limit` only truncates that page;

@@ -204,6 +204,7 @@ yourself. This command does not upload books to Hardcover.
 | [TUI guide](docs/tui.md) | Search, filters, book details, account screens, and keyboard controls |
 | [Configuration](docs/configuration.md) | Account setup, file locations, themes, covers, and troubleshooting |
 | [Agent usage](docs/agents.md) | JSON workflows, identifiers, partial results, and account action boundaries |
+| [Book recommendation skill](skills/library-books/SKILL.md) | Agent skill that recommends books on the shelf at your home branch |
 | [SSH deployment](docs/deployment.md) | Running the catalog browser remotely and the systemd installer |
 | [AGENTS.md](AGENTS.md) | Repository map and development instructions for coding agents |
 
